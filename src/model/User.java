@@ -1,22 +1,34 @@
 package model;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * Represents a user in the business management system.
  * Contains user authentication and permission details.
  */
-public class User {
+public class User implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String username;
+    
     private String password; // Stored as hash
+    
     private String salt; // For password hashing
+    
     private String fullName;
+    
     private String email;
+
     private String role; // ADMIN, MANAGER, STAFF, etc.
+    
     private boolean active;
-    private LocalDateTime lastLogin;
-    private LocalDateTime createdAt;
+    
+    private java.util.Date lastLogin;
+    
+    private java.util.Date createdAt;
     
     // Role constants
     public static final String ROLE_ADMIN = "ADMIN";
@@ -28,7 +40,7 @@ public class User {
      */
     public User() {
         this.active = true;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = new java.util.Date();
     }
     
     /**
@@ -65,7 +77,7 @@ public class User {
      */
     public User(int id, String username, String password, String salt, 
                 String fullName, String email, String role, boolean active,
-                LocalDateTime lastLogin, LocalDateTime createdAt) {
+                java.util.Date lastLogin, java.util.Date createdAt) {
         this.id = id;
         this.username = username;
         this.password = password;
@@ -144,19 +156,19 @@ public class User {
         this.active = active;
     }
 
-    public LocalDateTime getLastLogin() {
+    public java.util.Date getLastLogin() {
         return lastLogin;
     }
 
-    public void setLastLogin(LocalDateTime lastLogin) {
+    public void setLastLogin(java.util.Date lastLogin) {
         this.lastLogin = lastLogin;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public java.util.Date getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(java.util.Date createdAt) {
         this.createdAt = createdAt;
     }
     
@@ -182,12 +194,25 @@ public class User {
      * Updates the last login time to the current time
      */
     public void updateLastLogin() {
-        this.lastLogin = LocalDateTime.now();
+        this.lastLogin = new java.util.Date();
     }
     
     @Override
     public String toString() {
         return "User [id=" + id + ", username=" + username + ", fullName=" + fullName + 
                ", email=" + email + ", role=" + role + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        User user = (User) obj;
+        return id == user.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

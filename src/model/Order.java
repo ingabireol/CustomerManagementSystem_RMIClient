@@ -1,5 +1,6 @@
 package model;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -9,17 +10,26 @@ import java.util.List;
  * Represents an order in the business management system.
  * Contains order details and relationships to customers, order items, and invoices.
  */
-public class Order {
+public class Order implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String orderId;
-    private int customerId;
+    
     private Customer customer;
+    
     private LocalDate orderDate;
+    
     private BigDecimal totalAmount;
+    
     private String status;
+    
     private String paymentMethod;
-    private List<OrderItem> orderItems;
-    private List<Invoice> invoices;
+    
+    private List<OrderItem> orderItems = new ArrayList<>();
+    
+    private List<Invoice> invoices = new ArrayList<>();
     
     // Order status constants
     public static final String STATUS_PENDING = "Pending";
@@ -32,8 +42,6 @@ public class Order {
      * Default constructor
      */
     public Order() {
-        this.orderItems = new ArrayList<>();
-        this.invoices = new ArrayList<>();
         this.orderDate = LocalDate.now();
         this.totalAmount = BigDecimal.ZERO;
         this.status = STATUS_PENDING;
@@ -49,7 +57,6 @@ public class Order {
         this();
         this.orderId = orderId;
         this.customer = customer;
-        this.customerId = customer.getId();
     }
     
     /**
@@ -57,18 +64,18 @@ public class Order {
      * 
      * @param id Database ID
      * @param orderId Unique order identifier
-     * @param customerId ID of the customer who placed the order
+     * @param customer Customer who placed the order
      * @param orderDate Date the order was placed
      * @param totalAmount Total order amount
      * @param status Order status
      * @param paymentMethod Payment method used
      */
-    public Order(int id, String orderId, int customerId, LocalDate orderDate, 
+    public Order(int id, String orderId, Customer customer, LocalDate orderDate, 
                  BigDecimal totalAmount, String status, String paymentMethod) {
         this();
         this.id = id;
         this.orderId = orderId;
-        this.customerId = customerId;
+        this.customer = customer;
         this.orderDate = orderDate;
         this.totalAmount = totalAmount;
         this.status = status;
@@ -93,23 +100,32 @@ public class Order {
         this.orderId = orderId;
     }
 
-    public int getCustomerId() {
-        return customerId;
-    }
-
-    public void setCustomerId(int customerId) {
-        this.customerId = customerId;
-    }
-
     public Customer getCustomer() {
         return customer;
     }
 
     public void setCustomer(Customer customer) {
         this.customer = customer;
-        if (customer != null) {
-            this.customerId = customer.getId();
-        }
+    }
+    
+    /**
+     * Gets the customer ID for compatibility
+     * 
+     * @return Customer ID or 0 if no customer
+     */
+    public int getCustomerId() {
+        return customer != null ? customer.getId() : 0;
+    }
+    
+    /**
+     * Sets customer by ID (for compatibility)
+     * Note: This doesn't actually set the customer, just for interface compatibility
+     * 
+     * @param customerId The customer ID
+     */
+    public void setCustomerId(int customerId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Customer should be set using setCustomer(Customer customer)
     }
 
     public LocalDate getOrderDate() {
@@ -168,8 +184,6 @@ public class Order {
     public void addOrderItem(OrderItem item) {
         orderItems.add(item);
         item.setOrder(this);
-        
-        // Recalculate the total amount
         recalculateTotal();
     }
     
@@ -228,7 +242,20 @@ public class Order {
     
     @Override
     public String toString() {
-        return "Order [id=" + id + ", orderId=" + orderId + ", customerId=" + customerId + 
+        return "Order [id=" + id + ", orderId=" + orderId + ", customerId=" + getCustomerId() + 
                ", date=" + orderDate + ", total=" + totalAmount + ", status=" + status + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Order order = (Order) obj;
+        return id == order.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

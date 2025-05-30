@@ -1,20 +1,29 @@
 package model;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 
 /**
  * Represents a product in the business management system.
  * Contains product details with inventory tracking.
  */
-public class Product {
+public class Product implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String productCode;
+    
     private String name;
+    
     private String description;
+    
     private BigDecimal price;
+    
     private int stockQuantity;
+    
     private String category;
-    private int supplierId;
+    
     private Supplier supplier;
     
     /**
@@ -51,10 +60,10 @@ public class Product {
      * @param price Product price
      * @param stockQuantity Current stock level
      * @param category Product category
-     * @param supplierId ID of the supplier
+     * @param supplier Product supplier
      */
     public Product(int id, String productCode, String name, String description, 
-                   BigDecimal price, int stockQuantity, String category, int supplierId) {
+                   BigDecimal price, int stockQuantity, String category, Supplier supplier) {
         this();
         this.id = id;
         this.productCode = productCode;
@@ -63,7 +72,7 @@ public class Product {
         this.price = price;
         this.stockQuantity = stockQuantity;
         this.category = category;
-        this.supplierId = supplierId;
+        this.supplier = supplier;
     }
 
     // Getters and Setters
@@ -154,28 +163,50 @@ public class Product {
         this.category = category;
     }
 
-    public int getSupplierId() {
-        return supplierId;
-    }
-
-    public void setSupplierId(int supplierId) {
-        this.supplierId = supplierId;
-    }
-    
     public Supplier getSupplier() {
         return supplier;
     }
 
     public void setSupplier(Supplier supplier) {
         this.supplier = supplier;
-        if (supplier != null) {
-            this.supplierId = supplier.getId();
-        }
+    }
+    
+    /**
+     * Gets the supplier ID for compatibility
+     * 
+     * @return Supplier ID or 0 if no supplier
+     */
+    public int getSupplierId() {
+        return supplier != null ? supplier.getId() : 0;
+    }
+    
+    /**
+     * Sets supplier by ID (for compatibility)
+     * Note: This doesn't actually set the supplier, just for interface compatibility
+     * 
+     * @param supplierId The supplier ID
+     */
+    public void setSupplierId(int supplierId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Supplier should be set using setSupplier(Supplier supplier)
     }
     
     @Override
     public String toString() {
         return "Product [id=" + id + ", code=" + productCode + ", name=" + name + 
                ", price=" + price + ", stock=" + stockQuantity + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Product product = (Product) obj;
+        return id == product.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

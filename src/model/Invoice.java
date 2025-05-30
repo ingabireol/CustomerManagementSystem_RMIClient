@@ -1,5 +1,6 @@
 package model;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -9,16 +10,24 @@ import java.util.List;
  * Represents an invoice in the business management system.
  * Contains invoice details and relationships to orders and payments.
  */
-public class Invoice {
+public class Invoice implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String invoiceNumber;
-    private int orderId;
+    
     private Order order;
+    
     private LocalDate issueDate;
+    
     private LocalDate dueDate;
+    
     private BigDecimal amount;
+    
     private String status;
-    private List<Payment> payments;
+    
+    private List<Payment> payments = new ArrayList<>();
     
     // Invoice status constants
     public static final String STATUS_DRAFT = "Draft";
@@ -31,7 +40,6 @@ public class Invoice {
      * Default constructor
      */
     public Invoice() {
-        this.payments = new ArrayList<>();
         this.issueDate = LocalDate.now();
         this.dueDate = LocalDate.now().plusDays(30); // Default due date: 30 days from issue
         this.amount = BigDecimal.ZERO;
@@ -49,7 +57,6 @@ public class Invoice {
         this();
         this.invoiceNumber = invoiceNumber;
         this.order = order;
-        this.orderId = order.getId();
         this.amount = amount;
     }
     
@@ -58,18 +65,18 @@ public class Invoice {
      * 
      * @param id Database ID
      * @param invoiceNumber Unique invoice identifier
-     * @param orderId ID of the related order
+     * @param order The related order
      * @param issueDate Date the invoice was issued
      * @param dueDate Date the invoice is due
      * @param amount Invoice amount
      * @param status Invoice status
      */
-    public Invoice(int id, String invoiceNumber, int orderId, LocalDate issueDate, 
+    public Invoice(int id, String invoiceNumber, Order order, LocalDate issueDate, 
                    LocalDate dueDate, BigDecimal amount, String status) {
         this();
         this.id = id;
         this.invoiceNumber = invoiceNumber;
-        this.orderId = orderId;
+        this.order = order;
         this.issueDate = issueDate;
         this.dueDate = dueDate;
         this.amount = amount;
@@ -94,23 +101,32 @@ public class Invoice {
         this.invoiceNumber = invoiceNumber;
     }
 
-    public int getOrderId() {
-        return orderId;
-    }
-
-    public void setOrderId(int orderId) {
-        this.orderId = orderId;
-    }
-
     public Order getOrder() {
         return order;
     }
 
     public void setOrder(Order order) {
         this.order = order;
-        if (order != null) {
-            this.orderId = order.getId();
-        }
+    }
+    
+    /**
+     * Gets the order ID for compatibility
+     * 
+     * @return Order ID or 0 if no order
+     */
+    public int getOrderId() {
+        return order != null ? order.getId() : 0;
+    }
+    
+    /**
+     * Sets order by ID (for compatibility)
+     * Note: This doesn't actually set the order, just for interface compatibility
+     * 
+     * @param orderId The order ID
+     */
+    public void setOrderId(int orderId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Order should be set using setOrder(Order order)
     }
 
     public LocalDate getIssueDate() {
@@ -219,7 +235,20 @@ public class Invoice {
     
     @Override
     public String toString() {
-        return "Invoice [id=" + id + ", invoiceNumber=" + invoiceNumber + ", orderId=" + orderId + 
+        return "Invoice [id=" + id + ", invoiceNumber=" + invoiceNumber + ", orderId=" + getOrderId() + 
                ", issueDate=" + issueDate + ", amount=" + amount + ", status=" + status + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Invoice invoice = (Invoice) obj;
+        return id == invoice.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

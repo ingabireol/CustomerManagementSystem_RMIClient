@@ -1,26 +1,35 @@
 package model;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Represents a product supplier in the business management system.
  */
-public class Supplier {
+public class Supplier implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String supplierCode;
+    
     private String name;
+    
     private String contactPerson;
+    
     private String email;
+    
     private String phone;
+    
     private String address;
-    private List<Product> products;
+    
+    private List<Product> products = new ArrayList<>();
     
     /**
      * Default constructor
      */
     public Supplier() {
-        this.products = new ArrayList<>();
     }
     
     /**
@@ -32,7 +41,6 @@ public class Supplier {
      * @param email Contact email address
      */
     public Supplier(String supplierCode, String name, String contactPerson, String email) {
-        this();
         this.supplierCode = supplierCode;
         this.name = name;
         this.contactPerson = contactPerson;
@@ -52,7 +60,6 @@ public class Supplier {
      */
     public Supplier(int id, String supplierCode, String name, String contactPerson, 
                     String email, String phone, String address) {
-        this();
         this.id = id;
         this.supplierCode = supplierCode;
         this.name = name;
@@ -142,5 +149,18 @@ public class Supplier {
     public String toString() {
         return "Supplier [id=" + id + ", code=" + supplierCode + ", name=" + name + 
                ", contact=" + contactPerson + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Supplier supplier = (Supplier) obj;
+        return id == supplier.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

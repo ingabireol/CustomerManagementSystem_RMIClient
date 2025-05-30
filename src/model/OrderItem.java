@@ -1,18 +1,23 @@
 package model;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 
 /**
  * Represents an item in an order in the business management system.
  * Contains the relationship between orders and products.
  */
-public class OrderItem {
+public class OrderItem implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
-    private int orderId;
+    
     private Order order;
-    private int productId;
+    
     private Product product;
+    
     private int quantity;
+    
     private BigDecimal unitPrice;
     
     /**
@@ -32,7 +37,6 @@ public class OrderItem {
     public OrderItem(Product product, int quantity) {
         this();
         this.product = product;
-        this.productId = product.getId();
         this.quantity = quantity;
         this.unitPrice = product.getPrice();
     }
@@ -41,16 +45,16 @@ public class OrderItem {
      * Full constructor
      * 
      * @param id Database ID
-     * @param orderId ID of the order
-     * @param productId ID of the product
+     * @param order The order this item belongs to
+     * @param product The product being ordered
      * @param quantity Quantity ordered
      * @param unitPrice Price per unit at time of order
      */
-    public OrderItem(int id, int orderId, int productId, int quantity, BigDecimal unitPrice) {
+    public OrderItem(int id, Order order, Product product, int quantity, BigDecimal unitPrice) {
         this();
         this.id = id;
-        this.orderId = orderId;
-        this.productId = productId;
+        this.order = order;
+        this.product = product;
         this.quantity = quantity;
         this.unitPrice = unitPrice;
     }
@@ -65,31 +69,32 @@ public class OrderItem {
         this.id = id;
     }
 
-    public int getOrderId() {
-        return orderId;
-    }
-
-    public void setOrderId(int orderId) {
-        this.orderId = orderId;
-    }
-
     public Order getOrder() {
         return order;
     }
 
     public void setOrder(Order order) {
         this.order = order;
-        if (order != null) {
-            this.orderId = order.getId();
-        }
     }
-
-    public int getProductId() {
-        return productId;
+    
+    /**
+     * Gets the order ID for compatibility
+     * 
+     * @return Order ID or 0 if no order
+     */
+    public int getOrderId() {
+        return order != null ? order.getId() : 0;
     }
-
-    public void setProductId(int productId) {
-        this.productId = productId;
+    
+    /**
+     * Sets order by ID (for compatibility)
+     * Note: This doesn't actually set the order, just for interface compatibility
+     * 
+     * @param orderId The order ID
+     */
+    public void setOrderId(int orderId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Order should be set using setOrder(Order order)
     }
 
     public Product getProduct() {
@@ -98,9 +103,26 @@ public class OrderItem {
 
     public void setProduct(Product product) {
         this.product = product;
-        if (product != null) {
-            this.productId = product.getId();
-        }
+    }
+    
+    /**
+     * Gets the product ID for compatibility
+     * 
+     * @return Product ID or 0 if no product
+     */
+    public int getProductId() {
+        return product != null ? product.getId() : 0;
+    }
+    
+    /**
+     * Sets product by ID (for compatibility)
+     * Note: This doesn't actually set the product, just for interface compatibility
+     * 
+     * @param productId The product ID
+     */
+    public void setProductId(int productId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Product should be set using setProduct(Product product)
     }
 
     public int getQuantity() {
@@ -138,7 +160,20 @@ public class OrderItem {
     
     @Override
     public String toString() {
-        return "OrderItem [id=" + id + ", productId=" + productId + ", quantity=" + quantity + 
+        return "OrderItem [id=" + id + ", productId=" + getProductId() + ", quantity=" + quantity + 
                ", unitPrice=" + unitPrice + ", subtotal=" + getSubtotal() + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        OrderItem orderItem = (OrderItem) obj;
+        return id == orderItem.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

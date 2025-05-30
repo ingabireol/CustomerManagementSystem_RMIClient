@@ -1,5 +1,6 @@
 package model;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -8,22 +9,31 @@ import java.util.List;
  * Represents a customer in the business management system.
  * Contains customer details and relationships to orders.
  */
-public class Customer {
+public class Customer implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String customerId;
+    
     private String firstName;
+    
     private String lastName;
+    
     private String email;
+    
     private String phone;
+    
     private String address;
+    
     private LocalDate registrationDate;
-    private List<Order> orders;
+    
+    private List<Order> orders = new ArrayList<>();
     
     /**
      * Default constructor
      */
     public Customer() {
-        this.orders = new ArrayList<>();
         this.registrationDate = LocalDate.now();
     }
     
@@ -165,5 +175,18 @@ public class Customer {
     public String toString() {
         return "Customer [id=" + id + ", customerId=" + customerId + ", name=" + getFullName() + 
                ", email=" + email + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Customer customer = (Customer) obj;
+        return id == customer.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }

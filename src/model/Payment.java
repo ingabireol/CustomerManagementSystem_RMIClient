@@ -1,5 +1,6 @@
 package model;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -7,13 +8,19 @@ import java.time.LocalDate;
  * Represents a payment in the business management system.
  * Contains payment details and relationship to invoices.
  */
-public class Payment {
+public class Payment implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int id;
+    
     private String paymentId;
-    private int invoiceId;
+    
     private Invoice invoice;
+    
     private BigDecimal amount;
+    
     private LocalDate paymentDate;
+    
     private String paymentMethod;
     
     /**
@@ -36,7 +43,6 @@ public class Payment {
         this();
         this.paymentId = paymentId;
         this.invoice = invoice;
-        this.invoiceId = invoice.getId();
         this.amount = amount;
         this.paymentMethod = paymentMethod;
     }
@@ -46,17 +52,17 @@ public class Payment {
      * 
      * @param id Database ID
      * @param paymentId Unique payment identifier
-     * @param invoiceId ID of the invoice being paid
+     * @param invoice The invoice being paid
      * @param amount Payment amount
      * @param paymentDate Date the payment was made
      * @param paymentMethod Method of payment
      */
-    public Payment(int id, String paymentId, int invoiceId, BigDecimal amount, 
+    public Payment(int id, String paymentId, Invoice invoice, BigDecimal amount, 
                    LocalDate paymentDate, String paymentMethod) {
         this();
         this.id = id;
         this.paymentId = paymentId;
-        this.invoiceId = invoiceId;
+        this.invoice = invoice;
         this.amount = amount;
         this.paymentDate = paymentDate;
         this.paymentMethod = paymentMethod;
@@ -80,14 +86,6 @@ public class Payment {
         this.paymentId = paymentId;
     }
 
-    public int getInvoiceId() {
-        return invoiceId;
-    }
-
-    public void setInvoiceId(int invoiceId) {
-        this.invoiceId = invoiceId;
-    }
-
     public Invoice getInvoice() {
         return invoice;
     }
@@ -95,10 +93,29 @@ public class Payment {
     public void setInvoice(Invoice invoice) {
         this.invoice = invoice;
         if (invoice != null) {
-            this.invoiceId = invoice.getId();
             // Update the invoice status
             invoice.updateStatus();
         }
+    }
+    
+    /**
+     * Gets the invoice ID for compatibility
+     * 
+     * @return Invoice ID or 0 if no invoice
+     */
+    public int getInvoiceId() {
+        return invoice != null ? invoice.getId() : 0;
+    }
+    
+    /**
+     * Sets invoice by ID (for compatibility)
+     * Note: This doesn't actually set the invoice, just for interface compatibility
+     * 
+     * @param invoiceId The invoice ID
+     */
+    public void setInvoiceId(int invoiceId) {
+        // This method is kept for compatibility but doesn't do anything
+        // Invoice should be set using setInvoice(Invoice invoice)
     }
 
     public BigDecimal getAmount() {
@@ -131,7 +148,20 @@ public class Payment {
     
     @Override
     public String toString() {
-        return "Payment [id=" + id + ", paymentId=" + paymentId + ", invoiceId=" + invoiceId + 
+        return "Payment [id=" + id + ", paymentId=" + paymentId + ", invoiceId=" + getInvoiceId() + 
                ", amount=" + amount + ", date=" + paymentDate + ", method=" + paymentMethod + "]";
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        Payment payment = (Payment) obj;
+        return id == payment.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
     }
 }
