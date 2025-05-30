@@ -2,7 +2,8 @@ package ui.product;
 
 import model.Product;
 import model.Supplier;
-import dao.ProductDao;
+import controller.ProductController;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -16,7 +17,7 @@ import java.text.NumberFormat;
 import ui.UIFactory;
 
 /**
- * Detail view for showing product information.
+ * RMI-based detail view for showing product information.
  * Displays complete product details including supplier information.
  */
 public class ProductDetailsView extends JPanel {
@@ -34,7 +35,7 @@ public class ProductDetailsView extends JPanel {
     
     // Product data
     private Product product;
-    private ProductDao productDao;
+    private ProductController productController;
     
     // Callback for view actions
     private DetailsViewCallback callback;
@@ -50,21 +51,41 @@ public class ProductDetailsView extends JPanel {
     /**
      * Constructor
      * 
+     * @param productController The RMI-based product controller
      * @param product The product to display
      * @param callback Callback for view actions
      */
-    public ProductDetailsView(Product product, DetailsViewCallback callback) {
+    public ProductDetailsView(ProductController productController, Product product, DetailsViewCallback callback) {
+        this.productController = productController;
         this.product = product;
         this.callback = callback;
-        this.productDao = new ProductDao();
         
-        // Load product with supplier if needed
-        if (product != null && product.getSupplier() == null && product.getSupplierId() > 0) {
-            this.product = productDao.getProductWithSupplier(product.getId());
-        }
+        // Load product with supplier if needed using RMI service
+        loadProductWithSupplier();
         
         initializeUI();
         populateData();
+    }
+    
+    /**
+     * Load product with supplier information using RMI service
+     */
+    private void loadProductWithSupplier() {
+        if (product != null && product.getSupplier() == null && product.getSupplierId() > 0) {
+            try {
+                LogUtil.info("Loading product with supplier via RMI: " + product.getId());
+                Product productWithSupplier = productController.getProductService().getProductWithSupplier(product.getId());
+                if (productWithSupplier != null) {
+                    this.product = productWithSupplier;
+                    LogUtil.info("Product with supplier loaded successfully via RMI");
+                } else {
+                    LogUtil.warn("Failed to load product with supplier via RMI");
+                }
+            } catch (Exception ex) {
+                LogUtil.error("Error loading product with supplier via RMI", ex);
+                // Continue with the original product data
+            }
+        }
     }
     
     private void initializeUI() {
@@ -305,7 +326,9 @@ public class ProductDetailsView extends JPanel {
         
         JButton closeButton = UIFactory.createSecondaryButton("Close");
         JButton editButton = UIFactory.createWarningButton("Edit Product");
+        JButton refreshButton = UIFactory.createSecondaryButton("Refresh");
         
+        panel.add(refreshButton);
         panel.add(closeButton);
         panel.add(editButton);
         
@@ -325,6 +348,13 @@ public class ProductDetailsView extends JPanel {
                 if (callback != null && product != null) {
                     callback.onEditProduct(product);
                 }
+            }
+        });
+        
+        refreshButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                refreshProductData();
             }
         });
         
@@ -381,12 +411,108 @@ public class ProductDetailsView extends JPanel {
         if (supplier != null) {
             supplierValueLabel.setText(supplier.getName());
         } else if (product.getSupplierId() > 0) {
-            supplierValueLabel.setText("Supplier ID: " + product.getSupplierId());
+            // Try to load supplier name via RMI if we only have ID
+            loadSupplierName(product.getSupplierId());
         } else {
             supplierValueLabel.setText("No supplier");
         }
         
         // Set description
         descriptionValueArea.setText(product.getDescription());
+    }
+    
+    /**
+     * Load supplier name using RMI service
+     */
+    private void loadSupplierName(int supplierId) {
+        try {
+            LogUtil.info("Loading supplier name via RMI for ID: " + supplierId);
+            Supplier supplier = productController.getSupplierService().findSupplierById(supplierId);
+            if (supplier != null) {
+                supplierValueLabel.setText(supplier.getName());
+                // Update the product object with supplier info
+                product.setSupplier(supplier);
+                LogUtil.info("Supplier name loaded successfully via RMI: " + supplier.getName());
+            } else {
+                supplierValueLabel.setText("Supplier ID: " + supplierId);
+                LogUtil.warn("Supplier not found for ID: " + supplierId);
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading supplier name via RMI", ex);
+            supplierValueLabel.setText("Supplier ID: " + supplierId);
+        }
+    }
+    
+    /**
+     * Refresh product data from RMI service
+     */
+    public void refreshProductData() {
+        if (product == null || product.getId() <= 0) {
+            LogUtil.warn("Cannot refresh product data - invalid product");
+            return;
+        }
+        
+        try {
+            LogUtil.info("Refreshing product data via RMI for ID: " + product.getId());
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            
+            // Load fresh product data from RMI service
+            Product freshProduct = productController.getProductService().getProductWithSupplier(product.getId());
+            if (freshProduct != null) {
+                this.product = freshProduct;
+                populateData();
+                LogUtil.info("Product data refreshed successfully via RMI");
+                
+                JOptionPane.showMessageDialog(this,
+                    "Product data refreshed successfully!",
+                    "Refresh Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                LogUtil.warn("Failed to refresh product data - product not found");
+                JOptionPane.showMessageDialog(this,
+                    "Product not found. It may have been deleted.",
+                    "Refresh Failed",
+                    JOptionPane.WARNING_MESSAGE);
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error refreshing product data via RMI", ex);
+            JOptionPane.showMessageDialog(this,
+                "Error refreshing product data: " + ex.getMessage(),
+                "RMI Service Error",
+                JOptionPane.ERROR_MESSAGE);
+        } finally {
+            setCursor(Cursor.getDefaultCursor());
+        }
+    }
+    
+    /**
+     * Gets the current product
+     * 
+     * @return The current product
+     */
+    public Product getProduct() {
+        return product;
+    }
+    
+    /**
+     * Gets the product controller
+     * 
+     * @return The ProductController instance
+     */
+    public ProductController getProductController() {
+        return productController;
+    }
+    
+    /**
+     * Updates the product data (useful when called from outside)
+     * 
+     * @param updatedProduct The updated product data
+     */
+    public void updateProduct(Product updatedProduct) {
+        if (updatedProduct != null) {
+            this.product = updatedProduct;
+            populateData();
+            LogUtil.info("Product data updated in details view");
+        }
     }
 }

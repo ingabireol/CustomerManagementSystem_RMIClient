@@ -2,7 +2,9 @@ package ui.supplier;
 
 import model.Supplier;
 import model.Product;
-import dao.SupplierDao;
+import util.LogUtil;
+import util.RMIConnectionManager;
+import service.SupplierService;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -14,8 +16,8 @@ import java.util.List;
 import ui.UIFactory;
 
 /**
- * Detailed view for a supplier with associated products.
- * Shows all supplier information and its related products.
+ * RMI-based detailed view for a supplier with associated products.
+ * Shows all supplier information and its related products using remote services.
  */
 public class SupplierDetailsView extends JPanel {
     // UI Components
@@ -32,7 +34,9 @@ public class SupplierDetailsView extends JPanel {
     
     // Supplier data
     private Supplier supplier;
-    private SupplierDao supplierDao;
+    
+    // RMI Services
+    private SupplierService supplierService;
     
     // Callback for view actions
     private DetailsViewCallback callback;
@@ -54,15 +58,74 @@ public class SupplierDetailsView extends JPanel {
     public SupplierDetailsView(Supplier supplier, DetailsViewCallback callback) {
         this.supplier = supplier;
         this.callback = callback;
-        this.supplierDao = new SupplierDao();
+        
+        // Initialize RMI service
+        initializeRMIServices();
         
         // Load supplier with products if needed
-        if (supplier != null && (supplier.getProducts() == null || supplier.getProducts().isEmpty())) {
-            this.supplier = supplierDao.getSupplierWithProducts(supplier.getId());
-        }
+        loadSupplierDetails();
         
         initializeUI();
         populateData();
+    }
+    
+    /**
+     * Initializes RMI service connections
+     */
+    private void initializeRMIServices() {
+        try {
+            LogUtil.info("Initializing SupplierService for details view");
+            supplierService = RMIConnectionManager.getSupplierService();
+            
+            if (supplierService == null) {
+                LogUtil.error("Failed to get SupplierService from RMI");
+                showConnectionError();
+            } else {
+                LogUtil.info("Successfully connected to SupplierService");
+            }
+        } catch (Exception e) {
+            LogUtil.error("Error connecting to SupplierService", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error message
+     */
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+            this,
+            "Failed to connect to the server.\nSome features may not work properly.",
+            "Connection Error",
+            JOptionPane.ERROR_MESSAGE
+        );
+    }
+    
+    /**
+     * Loads supplier details with products from the server
+     */
+    private void loadSupplierDetails() {
+        if (supplier != null && supplierService != null) {
+            try {
+                // Load supplier with products using RMI
+                Supplier detailedSupplier = supplierService.getSupplierWithProducts(supplier.getId());
+                if (detailedSupplier != null) {
+                    this.supplier = detailedSupplier;
+                    LogUtil.info("Loaded supplier details with " + 
+                        (supplier.getProducts() != null ? supplier.getProducts().size() : 0) + " products");
+                } else {
+                    LogUtil.warn("Could not load detailed supplier information from server");
+                }
+            } catch (Exception e) {
+                LogUtil.error("Error loading supplier details from server", e);
+                JOptionPane.showMessageDialog(
+                    this,
+                    "Error loading supplier details: " + e.getMessage(),
+                    "Server Error",
+                    JOptionPane.ERROR_MESSAGE
+                );
+            }
+        }
     }
     
     private void initializeUI() {
@@ -298,29 +361,89 @@ public class SupplierDetailsView extends JPanel {
         }
         
         // Set supplier details
-        codeValueLabel.setText(supplier.getSupplierCode());
-        nameValueLabel.setText(supplier.getName());
-        contactPersonValueLabel.setText(supplier.getContactPerson());
-        emailValueLabel.setText(supplier.getEmail());
-        phoneValueLabel.setText(supplier.getPhone());
-        addressValueArea.setText(supplier.getAddress());
+        codeValueLabel.setText(supplier.getSupplierCode() != null ? supplier.getSupplierCode() : "N/A");
+        nameValueLabel.setText(supplier.getName() != null ? supplier.getName() : "N/A");
+        contactPersonValueLabel.setText(supplier.getContactPerson() != null ? supplier.getContactPerson() : "N/A");
+        emailValueLabel.setText(supplier.getEmail() != null ? supplier.getEmail() : "N/A");
+        phoneValueLabel.setText(supplier.getPhone() != null ? supplier.getPhone() : "N/A");
+        addressValueArea.setText(supplier.getAddress() != null ? supplier.getAddress() : "");
         
         // Populate products table
+        populateProductsTable();
+    }
+    
+    /**
+     * Populates the products table with supplier's products
+     */
+    private void populateProductsTable() {
+        // Clear existing data
         productsTableModel.setRowCount(0);
         
         List<Product> products = supplier.getProducts();
-        if (products != null) {
+        if (products != null && !products.isEmpty()) {
             for (Product product : products) {
                 Object[] rowData = {
                     product.getId(),
-                    product.getProductCode(),
-                    product.getName(),
-                    product.getPrice(),
+                    product.getProductCode() != null ? product.getProductCode() : "N/A",
+                    product.getName() != null ? product.getName() : "N/A",
+                    product.getPrice() != null ? product.getPrice() : "N/A",
                     product.getStockQuantity(),
-                    product.getCategory()
+                    product.getCategory() != null ? product.getCategory() : "N/A"
                 };
                 productsTableModel.addRow(rowData);
             }
+            
+            // Update section title with count
+            Container parent = productsTable.getParent().getParent().getParent();
+            if (parent instanceof JPanel) {
+                Component[] components = ((JPanel) parent).getComponents();
+                for (Component comp : components) {
+                    if (comp instanceof JLabel && ((JLabel) comp).getText().startsWith("Products Supplied")) {
+                        ((JLabel) comp).setText("Products Supplied (" + products.size() + ")");
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Show no products message
+            Object[] noDataRow = {"", "", "No products found for this supplier", "", "", ""};
+            productsTableModel.addRow(noDataRow);
         }
+    }
+    
+    /**
+     * Refreshes the supplier data from the server
+     */
+    public void refreshData() {
+        if (supplier != null && supplierService != null) {
+            try {
+                LogUtil.info("Refreshing supplier details from server");
+                Supplier refreshedSupplier = supplierService.getSupplierWithProducts(supplier.getId());
+                if (refreshedSupplier != null) {
+                    this.supplier = refreshedSupplier;
+                    populateData();
+                    LogUtil.info("Supplier details refreshed successfully");
+                } else {
+                    LogUtil.warn("Could not refresh supplier details - supplier not found");
+                }
+            } catch (Exception e) {
+                LogUtil.error("Error refreshing supplier details", e);
+                JOptionPane.showMessageDialog(
+                    this,
+                    "Error refreshing supplier details: " + e.getMessage(),
+                    "Refresh Error",
+                    JOptionPane.ERROR_MESSAGE
+                );
+            }
+        }
+    }
+    
+    /**
+     * Gets the current supplier
+     * 
+     * @return The supplier being displayed
+     */
+    public Supplier getSupplier() {
+        return supplier;
     }
 }

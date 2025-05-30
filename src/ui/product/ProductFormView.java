@@ -2,8 +2,8 @@ package ui.product;
 
 import model.Product;
 import model.Supplier;
-import dao.ProductDao;
-import dao.SupplierDao;
+import controller.ProductController;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -13,11 +13,12 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.math.BigDecimal;
 import java.text.NumberFormat;
+import java.util.ArrayList;
 import java.util.List;
 import ui.UIFactory;
 
 /**
- * Form view for creating and editing product records.
+ * RMI-based form view for creating and editing product records.
  * Provides fields for all product properties and validates input.
  */
 public class ProductFormView extends JPanel {
@@ -43,9 +44,8 @@ public class ProductFormView extends JPanel {
     private boolean editMode = false;
     private Product currentProduct;
     
-    // Data access
-    private ProductDao productDao;
-    private SupplierDao supplierDao;
+    // RMI Controller
+    private ProductController productController;
     private List<Supplier> supplierList;
     
     // Callback for form submission
@@ -62,12 +62,12 @@ public class ProductFormView extends JPanel {
     /**
      * Constructor for create mode
      * 
+     * @param productController The RMI-based product controller
      * @param callback Callback for form actions
      */
-    public ProductFormView(FormSubmissionCallback callback) {
+    public ProductFormView(ProductController productController, FormSubmissionCallback callback) {
+        this.productController = productController;
         this.callback = callback;
-        this.productDao = new ProductDao();
-        this.supplierDao = new SupplierDao();
         this.editMode = false;
         
         loadSuppliers();
@@ -77,13 +77,13 @@ public class ProductFormView extends JPanel {
     /**
      * Constructor for edit mode
      * 
+     * @param productController The RMI-based product controller
      * @param product Product to edit
      * @param callback Callback for form actions
      */
-    public ProductFormView(Product product, FormSubmissionCallback callback) {
+    public ProductFormView(ProductController productController, Product product, FormSubmissionCallback callback) {
+        this.productController = productController;
         this.callback = callback;
-        this.productDao = new ProductDao();
-        this.supplierDao = new SupplierDao();
         this.editMode = true;
         this.currentProduct = product;
         
@@ -93,19 +93,25 @@ public class ProductFormView extends JPanel {
     }
     
     /**
-     * Loads the list of suppliers for the supplier drop down
+     * Loads the list of suppliers using RMI service
      */
     private void loadSuppliers() {
         try {
-            this.supplierList = supplierDao.findAllSuppliers();
+            LogUtil.info("Loading suppliers from RMI service...");
+            this.supplierList = productController.getAllSuppliers();
+            if (supplierList == null) {
+                LogUtil.warn("Received null supplier list from RMI service");
+                this.supplierList = new ArrayList<>();
+            } else {
+                LogUtil.info("Loaded " + supplierList.size() + " suppliers from RMI service");
+            }
         } catch (Exception ex) {
+            LogUtil.error("Error loading suppliers from RMI service", ex);
             JOptionPane.showMessageDialog(this,
                 "Error loading suppliers: " + ex.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
-//            this.supplierList = List.of();
-            this.supplierList = null;
+            this.supplierList = new ArrayList<>();
         }
     }
     
@@ -245,11 +251,30 @@ public class ProductFormView extends JPanel {
         
         gbc.gridx = 1;
         gbc.weightx = 0.35;
-        String[] categories = {"Electronics", "Clothing", "Food & Beverages", "Home & Garden", "Office Supplies", "Other"};
+        
+        // Load categories from RMI service
+        String[] categories = loadCategories();
         categoryComboBox = UIFactory.createComboBox(categories);
         sectionPanel.add(categoryComboBox, gbc);
         
         return sectionPanel;
+    }
+    
+    /**
+     * Load categories from RMI service
+     */
+    private String[] loadCategories() {
+        try {
+            List<String> categoryList = productController.getAllCategories();
+            if (categoryList != null && !categoryList.isEmpty()) {
+                return categoryList.toArray(new String[0]);
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading categories from RMI service", ex);
+        }
+        
+        // Return default categories if RMI call fails
+        return new String[]{"Electronics", "Clothing", "Food & Beverages", "Home & Garden", "Office Supplies", "Other"};
     }
     
     private JPanel createInventorySection() {
@@ -383,10 +408,16 @@ public class ProductFormView extends JPanel {
                 productCodeValidationLabel.setText("Only letters, numbers, and hyphens allowed");
                 isValid = false;
             } else {
-                // Check if code already exists
-                Product existingProduct = productDao.findProductByCode(productCodeField.getText().trim());
-                if (existingProduct != null) {
-                    productCodeValidationLabel.setText("Product code already exists");
+                // Check if code already exists using RMI service
+                try {
+                    boolean exists = productController.getProductService().productCodeExists(productCodeField.getText().trim());
+                    if (exists) {
+                        productCodeValidationLabel.setText("Product code already exists");
+                        isValid = false;
+                    }
+                } catch (Exception ex) {
+                    LogUtil.error("Error checking product code existence", ex);
+                    productCodeValidationLabel.setText("Error validating product code");
                     isValid = false;
                 }
             }
@@ -448,29 +479,35 @@ public class ProductFormView extends JPanel {
                 product.setSupplier(selectedSupplier);
             }
             
-            int result;
+            // Use RMI service to save the product
+            Product savedProduct;
             if (editMode) {
-                result = productDao.updateProduct(product);
+                LogUtil.info("Updating product via RMI: " + product.getName());
+                savedProduct = productController.getProductService().updateProduct(product);
             } else {
-                result = productDao.createProduct(product);
+                LogUtil.info("Creating product via RMI: " + product.getName());
+                savedProduct = productController.getProductService().createProduct(product);
             }
             
-            if (result > 0) {
+            if (savedProduct != null) {
+                LogUtil.info("Product " + (editMode ? "updated" : "created") + " successfully via RMI");
                 if (callback != null) {
-                    callback.onSave(product);
+                    callback.onSave(savedProduct);
                 }
             } else {
+                String message = "Failed to " + (editMode ? "update" : "create") + " product.";
+                LogUtil.warn(message);
                 JOptionPane.showMessageDialog(this,
-                    "Failed to " + (editMode ? "update" : "create") + " product.",
-                    "Database Error",
+                    message,
+                    "RMI Service Error",
                     JOptionPane.ERROR_MESSAGE);
             }
         } catch (Exception ex) {
+            LogUtil.error("Error saving product via RMI", ex);
             JOptionPane.showMessageDialog(this,
                 "Error saving product: " + ex.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
@@ -509,5 +546,33 @@ public class ProductFormView extends JPanel {
                 }
             }
         }
+    }
+    
+    /**
+     * Refreshes the supplier list from RMI service
+     */
+    public void refreshSuppliers() {
+        loadSuppliers();
+        
+        // Update supplier combo box
+        DefaultComboBoxModel<Supplier> model = (DefaultComboBoxModel<Supplier>) supplierComboBox.getModel();
+        model.removeAllElements();
+        
+        if (supplierList != null) {
+            for (Supplier supplier : supplierList) {
+                model.addElement(supplier);
+            }
+        }
+        
+        supplierComboBox.repaint();
+    }
+    
+    /**
+     * Gets the current product controller
+     * 
+     * @return The ProductController instance
+     */
+    public ProductController getProductController() {
+        return productController;
     }
 }

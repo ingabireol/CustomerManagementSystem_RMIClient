@@ -2,7 +2,8 @@ package ui.product;
 
 import model.Product;
 import model.Supplier;
-import dao.ProductDao;
+import controller.ProductController;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -19,7 +20,7 @@ import java.util.List;
 import ui.UIFactory;
 
 /**
- * List view for displaying and managing products.
+ * RMI-based list view for displaying and managing products.
  * Provides functionality for searching, filtering, and performing CRUD operations.
  */
 public class ProductListView extends JPanel {
@@ -39,9 +40,9 @@ public class ProductListView extends JPanel {
     private JButton refreshButton;
     private JButton viewDetailsButton;
     
-    // Product data and DAO
+    // Product data and RMI controller
     private List<Product> productList;
-    private ProductDao productDao;
+    private ProductController productController;
     
     // Callback for list actions
     private ProductListCallback callback;
@@ -58,10 +59,13 @@ public class ProductListView extends JPanel {
     
     /**
      * Constructor
+     * 
+     * @param productController The RMI-based product controller
+     * @param callback Callback for list actions
      */
-    public ProductListView(ProductListCallback callback) {
+    public ProductListView(ProductController productController, ProductListCallback callback) {
+        this.productController = productController;
         this.callback = callback;
-        this.productDao = new ProductDao();
         this.productList = new ArrayList<>();
         
         initializeUI();
@@ -88,18 +92,27 @@ public class ProductListView extends JPanel {
     }
     
     /**
-     * Loads product data from the database
+     * Loads product data using RMI service
      */
     private void loadData() {
         try {
-            this.productList = productDao.findAllProducts();
+            LogUtil.info("Loading products via RMI service...");
+            this.productList = productController.getProductService().findAllProducts();
+            if (productList == null) {
+                LogUtil.warn("Received null product list from RMI service");
+                this.productList = new ArrayList<>();
+            } else {
+                LogUtil.info("Loaded " + productList.size() + " products via RMI service");
+            }
             refreshTableData();
         } catch (Exception ex) {
+            LogUtil.error("Error loading product data via RMI", ex);
             JOptionPane.showMessageDialog(this,
                 "Error loading product data: " + ex.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
+            this.productList = new ArrayList<>();
+            refreshTableData();
         }
     }
     
@@ -110,8 +123,8 @@ public class ProductListView extends JPanel {
         JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         searchPanel.setOpaque(false);
         
-        // Category filter combo box
-        String[] categoryOptions = {"All Categories", "Electronics", "Clothing", "Food & Beverages", "Home & Garden", "Office Supplies", "Other"};
+        // Category filter combo box - load from RMI service
+        String[] categoryOptions = loadCategoryOptions();
         categoryFilterComboBox = UIFactory.createComboBox(categoryOptions);
         categoryFilterComboBox.setPreferredSize(new Dimension(150, 30));
         
@@ -135,7 +148,7 @@ public class ProductListView extends JPanel {
         searchButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                applyFilter();
+                performSearch();
             }
         });
         
@@ -147,7 +160,35 @@ public class ProductListView extends JPanel {
             }
         });
         
+        // Add Enter key support for search field
+        searchField.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                performSearch();
+            }
+        });
+        
         return headerPanel;
+    }
+    
+    /**
+     * Load category options from RMI service
+     */
+    private String[] loadCategoryOptions() {
+        try {
+            List<String> categories = productController.getAllCategories();
+            if (categories != null && !categories.isEmpty()) {
+                List<String> options = new ArrayList<>();
+                options.add("All Categories");
+                options.addAll(categories);
+                return options.toArray(new String[0]);
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading categories from RMI service", ex);
+        }
+        
+        // Return default categories if RMI call fails
+        return new String[]{"All Categories", "Electronics", "Clothing", "Food & Beverages", "Home & Garden", "Office Supplies", "Other"};
     }
     
     private JPanel createTablePanel() {
@@ -159,7 +200,7 @@ public class ProductListView extends JPanel {
         ));
         
         // Create the table model with column names
-        String[] columnNames = {"ID", "Product Code", "Name", "Price", "Stock", "Category"};
+        String[] columnNames = {"ID", "Product Code", "Name", "Price", "Stock", "Category", "Supplier"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -190,6 +231,8 @@ public class ProductListView extends JPanel {
         productTable.getColumnModel().getColumn(2).setPreferredWidth(200); // Name
         productTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Price
         productTable.getColumnModel().getColumn(4).setPreferredWidth(80); // Stock
+        productTable.getColumnModel().getColumn(5).setPreferredWidth(120); // Category
+        productTable.getColumnModel().getColumn(6).setPreferredWidth(150); // Supplier
         
         // Add double-click listener for viewing details
         productTable.addMouseListener(new MouseAdapter() {
@@ -343,37 +386,63 @@ public class ProductListView extends JPanel {
     }
     
     /**
-     * Refreshes the table data with the current product list
+     * Performs search using RMI service
      */
-    private void refreshTableData() {
-        // Clear the table
-        tableModel.setRowCount(0);
+    private void performSearch() {
+        String searchText = searchField.getText().trim();
+        String selectedCategory = (String) categoryFilterComboBox.getSelectedItem();
         
-        // Populate the table with data
-        for (Product product : productList) {
-            Object[] rowData = {
-                product.getId(),
-                product.getProductCode(),
-                product.getName(),
-                product.getPrice(),
-                product.getStockQuantity(),
-                product.getCategory()
-            };
-            tableModel.addRow(rowData);
+        if (searchText.isEmpty() && "All Categories".equals(selectedCategory)) {
+            // Load all products
+            loadData();
+            return;
         }
         
-        // Reset selection and filters
-        productTable.clearSelection();
-        editButton.setEnabled(false);
-        deleteButton.setEnabled(false);
-        viewDetailsButton.setEnabled(false);
-        
-        // Apply any current filter
-        applyFilter();
+        try {
+            LogUtil.info("Performing search via RMI - Text: '" + searchText + "', Category: '" + selectedCategory + "'");
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            
+            List<Product> searchResults = new ArrayList<>();
+            
+            if (!searchText.isEmpty()) {
+                // Search by name using RMI service
+                List<Product> nameResults = productController.getProductService().findProductsByName(searchText);
+                if (nameResults != null) {
+                    searchResults.addAll(nameResults);
+                }
+            }
+            
+            if (!"All Categories".equals(selectedCategory)) {
+                // Search by category using RMI service
+                List<Product> categoryResults = productController.getProductService().findProductsByCategory(selectedCategory);
+                if (categoryResults != null) {
+                    if (searchResults.isEmpty()) {
+                        searchResults.addAll(categoryResults);
+                    } else {
+                        // Intersect the results if both search text and category are specified
+                        searchResults.retainAll(categoryResults);
+                    }
+                }
+            }
+            
+            this.productList = searchResults;
+            refreshTableData();
+            
+            LogUtil.info("Search completed via RMI - Found " + searchResults.size() + " products");
+            
+        } catch (Exception ex) {
+            LogUtil.error("Error performing search via RMI", ex);
+            JOptionPane.showMessageDialog(this,
+                "Error performing search: " + ex.getMessage(),
+                "RMI Service Error",
+                JOptionPane.ERROR_MESSAGE);
+        } finally {
+            setCursor(Cursor.getDefaultCursor());
+        }
     }
     
     /**
-     * Applies search and filter criteria to the table
+     * Applies local filter to the table data
      */
     private void applyFilter() {
         RowFilter<DefaultTableModel, Object> filter = null;
@@ -419,6 +488,44 @@ public class ProductListView extends JPanel {
     }
     
     /**
+     * Refreshes the table data with the current product list
+     */
+    private void refreshTableData() {
+        // Clear the table
+        tableModel.setRowCount(0);
+        
+        // Populate the table with data
+        for (Product product : productList) {
+            String supplierName = "N/A";
+            if (product.getSupplier() != null) {
+                supplierName = product.getSupplier().getName();
+            } else if (product.getSupplierId() > 0) {
+                supplierName = "ID: " + product.getSupplierId();
+            }
+            
+            Object[] rowData = {
+                product.getId(),
+                product.getProductCode(),
+                product.getName(),
+                product.getPrice(),
+                product.getStockQuantity(),
+                product.getCategory(),
+                supplierName
+            };
+            tableModel.addRow(rowData);
+        }
+        
+        // Reset selection and filters
+        productTable.clearSelection();
+        editButton.setEnabled(false);
+        deleteButton.setEnabled(false);
+        viewDetailsButton.setEnabled(false);
+        
+        // Apply any current filter
+        applyFilter();
+    }
+    
+    /**
      * Gets the Product object corresponding to a specific table row
      * 
      * @param modelRow Row index in the table model
@@ -437,16 +544,20 @@ public class ProductListView extends JPanel {
     }
     
     /**
-     * Deletes a product from the database
+     * Deletes a product using RMI service
      * 
      * @param product The product to delete
      */
     private void deleteProduct(Product product) {
         try {
-            int result = productDao.deleteProduct(product.getId());
-            if (result > 0) {
+            LogUtil.info("Deleting product via RMI: " + product.getName());
+            Product deletedProduct = productController.getProductService().deleteProduct(product);
+            
+            if (deletedProduct != null) {
                 productList.removeIf(p -> p.getId() == product.getId());
                 refreshTableData();
+                LogUtil.info("Product deleted successfully via RMI");
+                
                 JOptionPane.showMessageDialog(this,
                     "Product deleted successfully.",
                     "Success",
@@ -456,17 +567,18 @@ public class ProductListView extends JPanel {
                     callback.onDeleteProduct(product);
                 }
             } else {
+                LogUtil.warn("Failed to delete product via RMI");
                 JOptionPane.showMessageDialog(this,
                     "Failed to delete product. It may be referenced by other records.",
                     "Delete Failed",
                     JOptionPane.ERROR_MESSAGE);
             }
         } catch (Exception ex) {
+            LogUtil.error("Error deleting product via RMI", ex);
             JOptionPane.showMessageDialog(this,
                 "Error deleting product: " + ex.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
@@ -478,6 +590,7 @@ public class ProductListView extends JPanel {
     public void updateProducts(List<Product> products) {
         this.productList = products != null ? products : new ArrayList<>();
         refreshTableData();
+        LogUtil.info("Product list updated with " + this.productList.size() + " products");
     }
     
     /**
@@ -489,6 +602,7 @@ public class ProductListView extends JPanel {
         if (product != null && product.getId() > 0) {
             this.productList.add(product);
             refreshTableData();
+            LogUtil.info("Product added to list: " + product.getName());
         }
     }
     
@@ -506,6 +620,7 @@ public class ProductListView extends JPanel {
                 }
             }
             refreshTableData();
+            LogUtil.info("Product updated in list: " + product.getName());
         }
     }
     
@@ -518,6 +633,215 @@ public class ProductListView extends JPanel {
         if (product != null) {
             productList.removeIf(p -> p.getId() == product.getId());
             refreshTableData();
+            LogUtil.info("Product removed from list: " + product.getName());
         }
+    }
+    
+    /**
+     * Gets the current product list
+     * 
+     * @return List of current products
+     */
+    public List<Product> getProductList() {
+        return new ArrayList<>(productList);
+    }
+    
+    /**
+     * Gets the currently selected product
+     * 
+     * @return Selected product or null if none selected
+     */
+    public Product getSelectedProduct() {
+        int selectedRow = productTable.getSelectedRow();
+        if (selectedRow >= 0) {
+            selectedRow = productTable.convertRowIndexToModel(selectedRow);
+            return getProductAtRow(selectedRow);
+        }
+        return null;
+    }
+    
+    /**
+     * Refreshes the category filter options from RMI service
+     */
+    public void refreshCategoryFilter() {
+        try {
+            String[] newCategories = loadCategoryOptions();
+            String currentSelection = (String) categoryFilterComboBox.getSelectedItem();
+            
+            // Update combo box model
+            DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(newCategories);
+            categoryFilterComboBox.setModel(model);
+            
+            // Try to restore previous selection
+            if (currentSelection != null) {
+                for (int i = 0; i < newCategories.length; i++) {
+                    if (newCategories[i].equals(currentSelection)) {
+                        categoryFilterComboBox.setSelectedIndex(i);
+                        break;
+                    }
+                }
+            }
+            
+            LogUtil.info("Category filter refreshed");
+        } catch (Exception ex) {
+            LogUtil.error("Error refreshing category filter", ex);
+        }
+    }
+    
+    /**
+     * Clears the search and filter criteria
+     */
+    public void clearSearchAndFilter() {
+        searchField.setText("");
+        categoryFilterComboBox.setSelectedIndex(0); // "All Categories"
+        loadData(); // Reload all data
+        LogUtil.info("Search and filter cleared");
+    }
+    
+    /**
+     * Gets low stock products using RMI service
+     * 
+     * @param threshold Stock threshold
+     */
+    public void showLowStockProducts(int threshold) {
+        try {
+            LogUtil.info("Loading low stock products via RMI with threshold: " + threshold);
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            
+            List<Product> lowStockProducts = productController.getProductService().findLowStockProducts(threshold);
+            if (lowStockProducts != null) {
+                this.productList = lowStockProducts;
+                refreshTableData();
+                
+                JOptionPane.showMessageDialog(this,
+                    "Found " + lowStockProducts.size() + " products with stock below " + threshold,
+                    "Low Stock Products",
+                    JOptionPane.INFORMATION_MESSAGE);
+                
+                LogUtil.info("Low stock search completed - Found " + lowStockProducts.size() + " products");
+            } else {
+                LogUtil.warn("Received null low stock products list from RMI service");
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading low stock products via RMI", ex);
+            JOptionPane.showMessageDialog(this,
+                "Error loading low stock products: " + ex.getMessage(),
+                "RMI Service Error",
+                JOptionPane.ERROR_MESSAGE);
+        } finally {
+            setCursor(Cursor.getDefaultCursor());
+        }
+    }
+    
+    /**
+     * Shows products by supplier using RMI service
+     * 
+     * @param supplier The supplier to filter by
+     */
+    public void showProductsBySupplier(Supplier supplier) {
+        if (supplier == null) {
+            return;
+        }
+        
+        try {
+            LogUtil.info("Loading products by supplier via RMI: " + supplier.getName());
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            
+            List<Product> supplierProducts = productController.getProductService().findProductsBySupplier(supplier);
+            if (supplierProducts != null) {
+                this.productList = supplierProducts;
+                refreshTableData();
+                
+                JOptionPane.showMessageDialog(this,
+                    "Found " + supplierProducts.size() + " products from supplier: " + supplier.getName(),
+                    "Products by Supplier",
+                    JOptionPane.INFORMATION_MESSAGE);
+                
+                LogUtil.info("Supplier products search completed - Found " + supplierProducts.size() + " products");
+            } else {
+                LogUtil.warn("Received null supplier products list from RMI service");
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading products by supplier via RMI", ex);
+            JOptionPane.showMessageDialog(this,
+                "Error loading products by supplier: " + ex.getMessage(),
+                "RMI Service Error",
+                JOptionPane.ERROR_MESSAGE);
+        } finally {
+            setCursor(Cursor.getDefaultCursor());
+        }
+    }
+    
+    /**
+     * Gets the product controller
+     * 
+     * @return The ProductController instance
+     */
+    public ProductController getProductController() {
+        return productController;
+    }
+    
+    /**
+     * Sets the product controller (useful for dependency injection)
+     * 
+     * @param productController The new ProductController instance
+     */
+    public void setProductController(ProductController productController) {
+        this.productController = productController;
+        LogUtil.info("Product controller updated in list view");
+    }
+    
+    /**
+     * Exports the current product list to CSV format
+     * 
+     * @return CSV content as string
+     */
+    public String exportToCSV() {
+        StringBuilder csv = new StringBuilder();
+        
+        // Add header
+        csv.append("ID,Product Code,Name,Price,Stock,Category,Supplier\n");
+        
+        // Add data rows
+        for (Product product : productList) {
+            String supplierName = "N/A";
+            if (product.getSupplier() != null) {
+                supplierName = product.getSupplier().getName().replace(",", ";"); // Escape commas
+            } else if (product.getSupplierId() > 0) {
+                supplierName = "ID: " + product.getSupplierId();
+            }
+            
+            csv.append(product.getId()).append(",")
+               .append(product.getProductCode()).append(",")
+               .append(product.getName().replace(",", ";")).append(",") // Escape commas
+               .append(product.getPrice()).append(",")
+               .append(product.getStockQuantity()).append(",")
+               .append(product.getCategory().replace(",", ";")).append(",") // Escape commas
+               .append(supplierName).append("\n");
+        }
+        
+        LogUtil.info("Product list exported to CSV format - " + productList.size() + " rows");
+        return csv.toString();
+    }
+    
+    /**
+     * Gets table statistics
+     * 
+     * @return Statistics string
+     */
+    public String getTableStatistics() {
+        int totalProducts = productList.size();
+        int displayedRows = productTable.getRowCount();
+        
+        // Calculate low stock count
+        int lowStockCount = 0;
+        for (Product product : productList) {
+            if (product.getStockQuantity() < 10) {
+                lowStockCount++;
+            }
+        }
+        
+        return String.format("Total: %d products | Displayed: %d | Low stock: %d", 
+                           totalProducts, displayedRows, lowStockCount);
     }
 }

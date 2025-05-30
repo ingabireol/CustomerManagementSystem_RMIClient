@@ -44,8 +44,10 @@ public class ProductController {
         // Initialize RMI connections
         initializeRMIConnection();
         
-        // Initialize the list view
-        initializeListView();
+        // Initialize the list view only if RMI connection is successful
+        if (isConnected()) {
+            initializeListView();
+        }
     }
     
     /**
@@ -60,6 +62,8 @@ public class ProductController {
             LogUtil.info("Successfully connected to ProductService and SupplierService");
         } catch (Exception e) {
             LogUtil.error("Failed to connect to Product/Supplier services", e);
+            productService = null;
+            supplierService = null;
             showConnectionError();
         }
     }
@@ -68,12 +72,14 @@ public class ProductController {
      * Shows connection error dialog
      */
     private void showConnectionError() {
-        JOptionPane.showMessageDialog(
-            parentComponent,
-            "Failed to connect to the Product Service.\nPlease ensure the server is running and try again.",
-            "Connection Error",
-            JOptionPane.ERROR_MESSAGE
-        );
+        if (parentComponent != null) {
+            JOptionPane.showMessageDialog(
+                parentComponent,
+                "Failed to connect to the Product Service.\nPlease ensure the server is running and try again.",
+                "Connection Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
     }
     
     /**
@@ -89,7 +95,7 @@ public class ProductController {
      * Initializes the product list view with callbacks
      */
     private void initializeListView() {
-        listView = new ProductListView(new ProductListView.ProductListCallback() {
+        listView = new ProductListView(this, new ProductListView.ProductListCallback() {
             @Override
             public void onAddProduct() {
                 showAddProductDialog();
@@ -116,88 +122,101 @@ public class ProductController {
      * Shows the add product dialog
      */
     private void showAddProductDialog() {
-        ProductFormView[] formView = new ProductFormView[1];
-        formView[0] = new ProductFormView(new ProductFormView.FormSubmissionCallback() {
-            @Override
-            public void onSave(Product product) {
-                try {
-                    // Validate product data
-                    if (!validateProduct(product)) {
-                        return;
-                    }
-                    
-                    // Check if product code already exists
-                    if (productService.productCodeExists(product.getProductCode())) {
-                        JOptionPane.showMessageDialog(
-                            formView[0],
-                            "Product code already exists. Please use a different code.",
-                            "Duplicate Product Code",
-                            JOptionPane.WARNING_MESSAGE
-                        );
-                        return;
-                    }
-                    
-                    // Create the product using RMI service
-                    Product createdProduct = productService.createProduct(product);
-                    
-                    if (createdProduct != null) {
-                        // Update the list view with the new product
-                        listView.addProduct(createdProduct);
-                        
-                        // Close the dialog
-                        Window window = SwingUtilities.getWindowAncestor(formView[0]);
-                        if (window instanceof JDialog) {
-                            ((JDialog) window).dispose();
+        try {
+            ProductFormView[] formView = new ProductFormView[1];
+            formView[0] = new ProductFormView(this, new ProductFormView.FormSubmissionCallback() {
+                @Override
+                public void onSave(Product product) {
+                    try {
+                        // Validate product data
+                        if (!validateProduct(product)) {
+                            return;
                         }
                         
-                        JOptionPane.showMessageDialog(
-                            parentComponent,
-                            "Product created successfully!",
-                            "Success",
-                            JOptionPane.INFORMATION_MESSAGE
-                        );
-                    } else {
+                        // Check if product code already exists
+                        if (productService.productCodeExists(product.getProductCode())) {
+                            JOptionPane.showMessageDialog(
+                                formView[0],
+                                "Product code already exists. Please use a different code.",
+                                "Duplicate Product Code",
+                                JOptionPane.WARNING_MESSAGE
+                            );
+                            return;
+                        }
+                        
+                        // Create the product using RMI service
+                        Product createdProduct = productService.createProduct(product);
+                        
+                        if (createdProduct != null) {
+                            // Update the list view with the new product
+                            if (listView != null) {
+                                listView.addProduct(createdProduct);
+                            }
+                            
+                            // Close the dialog
+                            Window window = SwingUtilities.getWindowAncestor(formView[0]);
+                            if (window instanceof JDialog) {
+                                ((JDialog) window).dispose();
+                            }
+                            
+                            JOptionPane.showMessageDialog(
+                                parentComponent,
+                                "Product created successfully!",
+                                "Success",
+                                JOptionPane.INFORMATION_MESSAGE
+                            );
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                formView[0],
+                                "Failed to create product. Please try again.",
+                                "Error",
+                                JOptionPane.ERROR_MESSAGE
+                            );
+                        }
+                        
+                    } catch (Exception e) {
+                        LogUtil.error("Error creating product", e);
                         JOptionPane.showMessageDialog(
                             formView[0],
-                            "Failed to create product. Please try again.",
-                            "Error",
+                            "Error creating product: " + e.getMessage(),
+                            "RMI Service Error",
                             JOptionPane.ERROR_MESSAGE
                         );
                     }
-                    
-                } catch (Exception e) {
-                    LogUtil.error("Error creating product", e);
-                    JOptionPane.showMessageDialog(
-                        formView[0],
-                        "Error creating product: " + e.getMessage(),
-                        "Database Error",
-                        JOptionPane.ERROR_MESSAGE
-                    );
                 }
-            }
+                
+                @Override
+                public void onCancel() {
+                    // Close the dialog
+                    Window window = SwingUtilities.getWindowAncestor(formView[0]);
+                    if (window instanceof JDialog) {
+                        ((JDialog) window).dispose();
+                    }
+                }
+            });
             
-            @Override
-            public void onCancel() {
-                // Close the dialog
-                Window window = SwingUtilities.getWindowAncestor(formView[0]);
-                if (window instanceof JDialog) {
-                    ((JDialog) window).dispose();
-                }
-            }
-        });
-        
-        // Create and show the dialog
-        JDialog dialog = DialogFactory.createFormDialog(
-            parentComponent,
-            "Add New Product",
-            formView[0],
-            null, // onSave handled in callback
-            null, // onCancel handled in callback
-            600,
-            550
-        );
-        
-        dialog.setVisible(true);
+            // Create and show the dialog
+            JDialog dialog = DialogFactory.createFormDialog(
+                parentComponent,
+                "Add New Product",
+                formView[0],
+                null, // onSave handled in callback
+                null, // onCancel handled in callback
+                600,
+                550
+            );
+            
+            dialog.setVisible(true);
+            
+        } catch (Exception e) {
+            LogUtil.error("Error showing add product dialog", e);
+            JOptionPane.showMessageDialog(
+                parentComponent,
+                "Error opening product form: " + e.getMessage(),
+                "UI Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
     }
     
     /**
@@ -206,77 +225,90 @@ public class ProductController {
      * @param product The product to edit
      */
     private void showEditProductDialog(Product product) {
-        ProductFormView[] formView = new ProductFormView[1];
-        formView[0] = new ProductFormView(product, new ProductFormView.FormSubmissionCallback() {
-            @Override
-            public void onSave(Product updatedProduct) {
-                try {
-                    // Validate product data
-                    if (!validateProduct(updatedProduct)) {
-                        return;
-                    }
-                    
-                    // Update the product using RMI service
-                    Product savedProduct = productService.updateProduct(updatedProduct);
-                    
-                    if (savedProduct != null) {
-                        // Update the list view with the modified product
-                        listView.updateProduct(savedProduct);
-                        
-                        // Close the dialog
-                        Window window = SwingUtilities.getWindowAncestor(formView[0]);
-                        if (window instanceof JDialog) {
-                            ((JDialog) window).dispose();
+        try {
+            ProductFormView[] formView = new ProductFormView[1];
+            formView[0] = new ProductFormView(this, product, new ProductFormView.FormSubmissionCallback() {
+                @Override
+                public void onSave(Product updatedProduct) {
+                    try {
+                        // Validate product data
+                        if (!validateProduct(updatedProduct)) {
+                            return;
                         }
                         
-                        JOptionPane.showMessageDialog(
-                            parentComponent,
-                            "Product updated successfully!",
-                            "Success",
-                            JOptionPane.INFORMATION_MESSAGE
-                        );
-                    } else {
+                        // Update the product using RMI service
+                        Product savedProduct = productService.updateProduct(updatedProduct);
+                        
+                        if (savedProduct != null) {
+                            // Update the list view with the modified product
+                            if (listView != null) {
+                                listView.updateProduct(savedProduct);
+                            }
+                            
+                            // Close the dialog
+                            Window window = SwingUtilities.getWindowAncestor(formView[0]);
+                            if (window instanceof JDialog) {
+                                ((JDialog) window).dispose();
+                            }
+                            
+                            JOptionPane.showMessageDialog(
+                                parentComponent,
+                                "Product updated successfully!",
+                                "Success",
+                                JOptionPane.INFORMATION_MESSAGE
+                            );
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                formView[0],
+                                "Failed to update product. Please try again.",
+                                "Error",
+                                JOptionPane.ERROR_MESSAGE
+                            );
+                        }
+                        
+                    } catch (Exception e) {
+                        LogUtil.error("Error updating product", e);
                         JOptionPane.showMessageDialog(
                             formView[0],
-                            "Failed to update product. Please try again.",
-                            "Error",
+                            "Error updating product: " + e.getMessage(),
+                            "RMI Service Error",
                             JOptionPane.ERROR_MESSAGE
                         );
                     }
-                    
-                } catch (Exception e) {
-                    LogUtil.error("Error updating product", e);
-                    JOptionPane.showMessageDialog(
-                        formView[0],
-                        "Error updating product: " + e.getMessage(),
-                        "Database Error",
-                        JOptionPane.ERROR_MESSAGE
-                    );
                 }
-            }
+                
+                @Override
+                public void onCancel() {
+                    // Close the dialog
+                    Window window = SwingUtilities.getWindowAncestor(formView[0]);
+                    if (window instanceof JDialog) {
+                        ((JDialog) window).dispose();
+                    }
+                }
+            });
             
-            @Override
-            public void onCancel() {
-                // Close the dialog
-                Window window = SwingUtilities.getWindowAncestor(formView[0]);
-                if (window instanceof JDialog) {
-                    ((JDialog) window).dispose();
-                }
-            }
-        });
-        
-        // Create and show the dialog
-        JDialog dialog = DialogFactory.createFormDialog(
-            parentComponent,
-            "Edit Product",
-            formView[0],
-            null, // onSave handled in callback
-            null, // onCancel handled in callback
-            600,
-            550
-        );
-        
-        dialog.setVisible(true);
+            // Create and show the dialog
+            JDialog dialog = DialogFactory.createFormDialog(
+                parentComponent,
+                "Edit Product",
+                formView[0],
+                null, // onSave handled in callback
+                null, // onCancel handled in callback
+                600,
+                550
+            );
+            
+            dialog.setVisible(true);
+            
+        } catch (Exception e) {
+            LogUtil.error("Error showing edit product dialog", e);
+            JOptionPane.showMessageDialog(
+                parentComponent,
+                "Error opening product edit form: " + e.getMessage(),
+                "UI Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
     }
     
     /**
@@ -299,7 +331,9 @@ public class ProductController {
                 
                 if (deletedProduct != null) {
                     // Remove from list view
-                    listView.removeProduct(product);
+                    if (listView != null) {
+                        listView.removeProduct(product);
+                    }
                     
                     JOptionPane.showMessageDialog(
                         parentComponent,
@@ -321,7 +355,7 @@ public class ProductController {
                 JOptionPane.showMessageDialog(
                     parentComponent,
                     "Error deleting product: " + e.getMessage(),
-                    "Database Error",
+                    "RMI Service Error",
                     JOptionPane.ERROR_MESSAGE
                 );
             }
@@ -343,7 +377,7 @@ public class ProductController {
             
             // Create the details view with the product that has supplier information
             final ProductDetailsView[] detailsView = new ProductDetailsView[1];
-            detailsView[0] = new ProductDetailsView(productWithSupplier, new ProductDetailsView.DetailsViewCallback() {
+            detailsView[0] = new ProductDetailsView(this, productWithSupplier, new ProductDetailsView.DetailsViewCallback() {
                 @Override
                 public void onEditProduct(Product productToEdit) {
                     // Close the details dialog
@@ -383,7 +417,7 @@ public class ProductController {
             JOptionPane.showMessageDialog(
                 parentComponent,
                 "Error loading product details: " + e.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE
             );
         }
@@ -443,20 +477,25 @@ public class ProductController {
      * Refreshes the product list with data from the server
      */
     public void refreshProductList() {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot refresh product list - not connected to RMI services");
+            return;
+        }
+        
         try {
             List<Product> products = productService.findAllProducts();
-            if (products != null) {
+            if (products != null && listView != null) {
                 listView.updateProducts(products);
                 LogUtil.info("Product list refreshed with " + products.size() + " products");
             } else {
-                LogUtil.warn("Received null product list from server");
+                LogUtil.warn("Received null product list from server or list view not initialized");
             }
         } catch (Exception ex) {
             LogUtil.error("Error loading products", ex);
             JOptionPane.showMessageDialog(
                 parentComponent,
                 "Error loading products: " + ex.getMessage(),
-                "Database Error",
+                "RMI Service Error",
                 JOptionPane.ERROR_MESSAGE
             );
         }
@@ -468,9 +507,14 @@ public class ProductController {
      * @param name The name to search for
      */
     public void searchProducts(String name) {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot search products - not connected to RMI services");
+            return;
+        }
+        
         try {
             List<Product> products = productService.findProductsByName(name);
-            if (products != null) {
+            if (products != null && listView != null) {
                 listView.updateProducts(products);
                 LogUtil.info("Search completed, found " + products.size() + " products");
             }
@@ -491,9 +535,14 @@ public class ProductController {
      * @param category The category to search for
      */
     public void searchProductsByCategory(String category) {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot search products by category - not connected to RMI services");
+            return;
+        }
+        
         try {
             List<Product> products = productService.findProductsByCategory(category);
-            if (products != null) {
+            if (products != null && listView != null) {
                 listView.updateProducts(products);
                 LogUtil.info("Category search completed, found " + products.size() + " products");
             }
@@ -514,9 +563,14 @@ public class ProductController {
      * @param threshold The stock threshold
      */
     public void getLowStockProducts(int threshold) {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot get low stock products - not connected to RMI services");
+            return;
+        }
+        
         try {
             List<Product> products = productService.findLowStockProducts(threshold);
-            if (products != null) {
+            if (products != null && listView != null) {
                 listView.updateProducts(products);
                 LogUtil.info("Low stock search completed, found " + products.size() + " products");
             }
@@ -537,6 +591,11 @@ public class ProductController {
      * @return List of categories
      */
     public List<String> getAllCategories() {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot get categories - not connected to RMI services");
+            return null;
+        }
+        
         try {
             return productService.findAllCategories();
         } catch (Exception ex) {
@@ -551,6 +610,11 @@ public class ProductController {
      * @return List of suppliers
      */
     public List<Supplier> getAllSuppliers() {
+        if (!isConnected()) {
+            LogUtil.warn("Cannot get suppliers - not connected to RMI services");
+            return null;
+        }
+        
         try {
             return supplierService.findAllSuppliers();
         } catch (Exception ex) {
@@ -590,6 +654,30 @@ public class ProductController {
      * Reconnects to the RMI server
      */
     public void reconnect() {
+        LogUtil.info("Attempting to reconnect to RMI services...");
         initializeRMIConnection();
+        
+        // Reinitialize list view if connection successful and it wasn't initialized before
+        if (isConnected() && listView == null) {
+            initializeListView();
+        }
+    }
+    
+    /**
+     * Sets the parent component for dialogs
+     * 
+     * @param parentComponent The new parent component
+     */
+    public void setParentComponent(Component parentComponent) {
+        this.parentComponent = parentComponent;
+    }
+    
+    /**
+     * Gets the parent component
+     * 
+     * @return The parent component
+     */
+    public Component getParentComponent() {
+        return parentComponent;
     }
 }

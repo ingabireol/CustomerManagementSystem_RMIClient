@@ -1,9 +1,10 @@
 package ui.auth;
 
 import model.User;
-import dao.UserDao;
-import ui.MainView;
+import service.UserService;
 import ui.UIFactory;
+import util.LogUtil;
+import util.RMIConnectionManager;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -19,8 +20,8 @@ import java.awt.event.KeyEvent;
 import java.awt.geom.RoundRectangle2D;
 
 /**
- * Login screen for the Business Management System.
- * Handles user authentication and validation.
+ * Modern RMI-enabled login screen for the Business Management System.
+ * Handles user authentication using remote UserService and provides a clean, modern interface.
  */
 public class LoginView extends JFrame {
     // Components
@@ -31,13 +32,14 @@ public class LoginView extends JFrame {
     private JLabel statusLabel;
     private JCheckBox rememberMeCheckbox;
     private JLabel forgotPasswordLabel;
+    private JProgressBar progressBar;
     
     // Styling constants
     private static final Color FOCUS_INDICATOR_COLOR = UIFactory.PRIMARY_COLOR;
     private static final int FIELD_HEIGHT = 40;
     
-    // Data access
-    private UserDao userDao;
+    // RMI service
+    private UserService userService;
     
     // Authentication callback
     private AuthenticationCallback callback;
@@ -46,28 +48,9 @@ public class LoginView extends JFrame {
      * Interface for authentication callback
      */
     public interface AuthenticationCallback {
-        /**
-         * Called when a user successfully logs in
-         * 
-         * @param user The authenticated user
-         */
         void onLoginSuccess(User user);
-        
-        /**
-         * Called when login fails
-         * 
-         * @param reason The reason for failure
-         */
         void onLoginFailure(String reason);
-        
-        /**
-         * Called when the user cancels login
-         */
         void onCancel();
-        
-        /**
-         * Called when the user clicks the forgot password link
-         */
         void onForgotPassword();
     }
     
@@ -80,36 +63,71 @@ public class LoginView extends JFrame {
     
     /**
      * Constructor with callback
-     * 
-     * @param callback Authentication callback
      */
     public LoginView(AuthenticationCallback callback) {
         this.callback = callback;
-        this.userDao = new UserDao();
-        
-        // Create the users table and default admin if needed
-        userDao.createUsersTable();
-        userDao.createDefaultAdmin();
-        
+        initializeRMIConnection();
         initializeUI();
+        LogUtil.info("LoginView initialized");
+    }
+    
+    /**
+     * Initializes the RMI connection to the user service
+     */
+    private void initializeRMIConnection() {
+        try {
+            LogUtil.info("Connecting to UserService for authentication...");
+            userService = RMIConnectionManager.getUserService();
+            
+            if (userService != null) {
+                LogUtil.info("Successfully connected to UserService");
+            } else {
+                LogUtil.error("Failed to get UserService from RMI registry");
+                showConnectionError();
+            }
+        } catch (Exception e) {
+            LogUtil.error("Failed to connect to UserService", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error and offers retry option
+     */
+    private void showConnectionError() {
+        SwingUtilities.invokeLater(() -> {
+            int result = JOptionPane.showConfirmDialog(
+                this,
+                "Unable to connect to the authentication service.\n\n" +
+                "Please ensure the server is running and try again.\n\n" +
+                "Would you like to retry the connection?",
+                "Connection Error",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.ERROR_MESSAGE
+            );
+            
+            if (result == JOptionPane.YES_OPTION) {
+                initializeRMIConnection();
+            } else {
+                System.exit(1);
+            }
+        });
     }
     
     private void initializeUI() {
         // Set up the frame
-        setTitle("Customer Management System - Login");
-        setSize(450, 550);
-        setMinimumSize(new Dimension(400, 500));
+        setTitle("Business Management System - Login");
+        setSize(450, 600);
+        setMinimumSize(new Dimension(400, 550));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         setResizable(false);
         
-        // Set up the main panel with a gradient background
+        // Set up the main panel with gradient background
         JPanel mainPanel = new JPanel(new BorderLayout()) {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                
-                // Create gradient background
                 Graphics2D g2d = (Graphics2D) g.create();
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 
@@ -134,23 +152,17 @@ public class LoginView extends JFrame {
         
         setContentPane(mainPanel);
         
-        // Create the logo/header panel
+        // Create components
         JPanel headerPanel = createHeaderPanel();
         mainPanel.add(headerPanel, BorderLayout.NORTH);
         
-        // Create the form panel in a card shape
         JPanel formWrapper = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 30));
         formWrapper.setOpaque(false);
-        
         JPanel formCardPanel = createFormCardPanel();
         formWrapper.add(formCardPanel);
-        
         mainPanel.add(formWrapper, BorderLayout.CENTER);
         
-        // Register actions
         registerActions();
-        
-        // Set initial focus
         SwingUtilities.invokeLater(() -> usernameField.requestFocusInWindow());
     }
     
@@ -158,20 +170,29 @@ public class LoginView extends JFrame {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setOpaque(false);
         panel.setPreferredSize(new Dimension(getWidth(), 150));
-        // Logo placeholder
-        JLabel logoLabel = new JLabel("CUSTOMER MANAGEMENT SYSTEM");
+        
+        // Main title
+        JLabel logoLabel = new JLabel("BUSINESS MANAGEMENT SYSTEM");
         logoLabel.setFont(new Font("Segoe UI", Font.BOLD, 22));
         logoLabel.setForeground(Color.WHITE);
         logoLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        logoLabel.setVerticalAlignment(SwingConstants.CENTER);
+        logoLabel.setBorder(new EmptyBorder(20, 0, 5, 0));
         
-        // Add subtle shadow effect to text
-        logoLabel.setBorder(new EmptyBorder(20, 0, 0, 0));
+        // Subtitle
+        JLabel subtitleLabel = new JLabel("Customer • Product • Order Management");
+        subtitleLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        subtitleLabel.setForeground(new Color(255, 255, 255, 200));
+        subtitleLabel.setHorizontalAlignment(SwingConstants.CENTER);
         
-        panel.add(logoLabel, BorderLayout.CENTER);
+        JPanel titlePanel = new JPanel(new BorderLayout());
+        titlePanel.setOpaque(false);
+        titlePanel.add(logoLabel, BorderLayout.CENTER);
+        titlePanel.add(subtitleLabel, BorderLayout.SOUTH);
         
-        // Add version info
-        JLabel versionLabel = new JLabel("v1.0.0");
+        panel.add(titlePanel, BorderLayout.CENTER);
+        
+        // Version info
+        JLabel versionLabel = new JLabel("v2.0.0 - RMI Edition");
         versionLabel.setForeground(new Color(255, 255, 255, 180));
         versionLabel.setFont(UIFactory.SMALL_FONT);
         versionLabel.setBorder(new EmptyBorder(0, 0, 5, 10));
@@ -182,7 +203,6 @@ public class LoginView extends JFrame {
     }
     
     private JPanel createFormCardPanel() {
-        // Create a card-shaped panel with shadow effect
         JPanel cardPanel = new JPanel(new BorderLayout()) {
             @Override
             public boolean isOpaque() {
@@ -210,10 +230,9 @@ public class LoginView extends JFrame {
             }
         };
         
-        cardPanel.setPreferredSize(new Dimension(350, 350));
+        cardPanel.setPreferredSize(new Dimension(350, 380));
         cardPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
         
-        // Create the form panel
         JPanel formPanel = createFormPanel();
         cardPanel.add(formPanel, BorderLayout.CENTER);
         
@@ -227,8 +246,8 @@ public class LoginView extends JFrame {
         panel.setBorder(new EmptyBorder(10, 15, 10, 15));
         
         // Title
-        JLabel titleLabel = new JLabel("Login to Your Account");
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        JLabel titleLabel = new JLabel("Sign In");
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 24));
         titleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         panel.add(titleLabel);
         
@@ -239,7 +258,6 @@ public class LoginView extends JFrame {
         subtitleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         panel.add(subtitleLabel);
         
-        // Add some space
         panel.add(Box.createRigidArea(new Dimension(0, 25)));
         
         // Username field
@@ -268,19 +286,17 @@ public class LoginView extends JFrame {
         panel.add(passwordField);
         panel.add(Box.createRigidArea(new Dimension(0, 5)));
         
-        // Additional options panel (remember me and forgot password)
+        // Options panel
         JPanel optionsPanel = new JPanel(new BorderLayout());
         optionsPanel.setOpaque(false);
         optionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         optionsPanel.setMaximumSize(new Dimension(Short.MAX_VALUE, 30));
         
-        // Remember me checkbox
         rememberMeCheckbox = new JCheckBox("Remember me");
         rememberMeCheckbox.setFont(UIFactory.SMALL_FONT);
         rememberMeCheckbox.setOpaque(false);
         optionsPanel.add(rememberMeCheckbox, BorderLayout.WEST);
         
-        // Forgot password link
         forgotPasswordLabel = new JLabel("Forgot password?");
         forgotPasswordLabel.setFont(UIFactory.SMALL_FONT);
         forgotPasswordLabel.setForeground(UIFactory.PRIMARY_COLOR);
@@ -290,14 +306,23 @@ public class LoginView extends JFrame {
         panel.add(optionsPanel);
         panel.add(Box.createRigidArea(new Dimension(0, 20)));
         
+        // Progress bar
+        progressBar = new JProgressBar();
+        progressBar.setIndeterminate(true);
+        progressBar.setVisible(false);
+        progressBar.setAlignmentX(Component.CENTER_ALIGNMENT);
+        progressBar.setMaximumSize(new Dimension(200, 20));
+        panel.add(progressBar);
+        panel.add(Box.createRigidArea(new Dimension(0, 10)));
+        
         // Login button
-        loginButton = createStyledLoginButton("Login");
+        loginButton = createStyledLoginButton("Sign In");
         loginButton.setAlignmentX(Component.CENTER_ALIGNMENT);
         panel.add(loginButton);
         panel.add(Box.createRigidArea(new Dimension(0, 10)));
         
         // Cancel button
-        cancelButton = new JButton("Cancel");
+        cancelButton = new JButton("Exit Application");
         cancelButton.setFont(UIFactory.BODY_FONT);
         cancelButton.setForeground(UIFactory.MEDIUM_GRAY);
         cancelButton.setBorderPainted(false);
@@ -308,12 +333,11 @@ public class LoginView extends JFrame {
         panel.add(cancelButton);
         panel.add(Box.createRigidArea(new Dimension(0, 15)));
         
-        // Status label for errors
+        // Status label
         statusLabel = new JLabel("");
         statusLabel.setFont(UIFactory.SMALL_FONT);
         statusLabel.setForeground(UIFactory.ERROR_COLOR);
         statusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        
         panel.add(statusLabel);
         panel.add(Box.createVerticalGlue());
         
@@ -326,13 +350,11 @@ public class LoginView extends JFrame {
         field.setMaximumSize(new Dimension(Short.MAX_VALUE, FIELD_HEIGHT));
         field.setPreferredSize(new Dimension(300, FIELD_HEIGHT));
         
-        // Create custom border
         field.setBorder(new CompoundBorder(
             new LineBorder(UIFactory.LIGHT_GRAY, 1, true),
             new EmptyBorder(5, 10, 5, 10)
         ));
         
-        // Add focus listener for border change
         field.addFocusListener(new FocusAdapter() {
             @Override
             public void focusGained(FocusEvent e) {
@@ -360,13 +382,11 @@ public class LoginView extends JFrame {
         field.setMaximumSize(new Dimension(Short.MAX_VALUE, FIELD_HEIGHT));
         field.setPreferredSize(new Dimension(300, FIELD_HEIGHT));
         
-        // Create custom border
         field.setBorder(new CompoundBorder(
             new LineBorder(UIFactory.LIGHT_GRAY, 1, true),
             new EmptyBorder(5, 10, 5, 10)
         ));
         
-        // Add focus listener for border change
         field.addFocusListener(new FocusAdapter() {
             @Override
             public void focusGained(FocusEvent e) {
@@ -395,7 +415,6 @@ public class LoginView extends JFrame {
                 Graphics2D g2 = (Graphics2D) g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 
-                // Draw gradient background
                 GradientPaint gp = new GradientPaint(
                     0, 0, UIFactory.PRIMARY_COLOR,
                     0, getHeight(), new Color(0x0D47A1)
@@ -404,7 +423,6 @@ public class LoginView extends JFrame {
                 
                 g2.fill(new RoundRectangle2D.Double(0, 0, getWidth(), getHeight(), 10, 10));
                 
-                // Draw text
                 g2.setColor(getForeground());
                 FontMetrics fm = g2.getFontMetrics();
                 Rectangle textBounds = fm.getStringBounds(text, g2).getBounds();
@@ -425,7 +443,6 @@ public class LoginView extends JFrame {
         button.setFocusPainted(false);
         button.setCursor(new Cursor(Cursor.HAND_CURSOR));
         
-        // Add hover effect
         button.addMouseListener(new java.awt.event.MouseAdapter() {
             public void mouseEntered(java.awt.event.MouseEvent evt) {
                 button.setFont(new Font("Segoe UI", Font.BOLD, 15));
@@ -440,57 +457,47 @@ public class LoginView extends JFrame {
     }
     
     private void registerActions() {
-        // Login button action
-        loginButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                attemptLogin();
-            }
-        });
+        loginButton.addActionListener(e -> attemptLogin());
         
-        // Cancel button action
-        cancelButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                if (callback != null) {
-                    callback.onCancel();
-                } else {
+        cancelButton.addActionListener(e -> {
+            if (callback != null) {
+                callback.onCancel();
+            } else {
+                int result = JOptionPane.showConfirmDialog(
+                    this,
+                    "Are you sure you want to exit the application?",
+                    "Exit Application",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+                );
+                
+                if (result == JOptionPane.YES_OPTION) {
                     System.exit(0);
                 }
             }
         });
         
-        // Enter key in password field triggers login
-        passwordField.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                loginButton.doClick();
-            }
-        });
+        passwordField.addActionListener(e -> loginButton.doClick());
         
-        // Tab behavior to move between fields
         usernameField.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_TAB) {
+                if (e.getKeyCode() == KeyEvent.VK_TAB && !e.isShiftDown()) {
+                    passwordField.requestFocusInWindow();
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_ENTER) {
                     passwordField.requestFocusInWindow();
                     e.consume();
                 }
             }
         });
         
-        // Forgot password link action
         forgotPasswordLabel.addMouseListener(new java.awt.event.MouseAdapter() {
             public void mouseClicked(java.awt.event.MouseEvent evt) {
                 if (callback != null) {
                     callback.onForgotPassword();
                 } else {
-                    JOptionPane.showMessageDialog(
-                        LoginView.this,
-                        "Password reset functionality would be implemented here.",
-                        "Forgot Password",
-                        JOptionPane.INFORMATION_MESSAGE
-                    );
+                    handleForgotPassword();
                 }
             }
             
@@ -504,14 +511,12 @@ public class LoginView extends JFrame {
         });
     }
     
-    /**
-     * Attempts to log in with the provided credentials
-     */
     private void attemptLogin() {
-        // Validate input
         String username = usernameField.getText().trim();
         char[] passwordChars = passwordField.getPassword();
         String password = new String(passwordChars);
+        
+        java.util.Arrays.fill(passwordChars, ' ');
         
         if (username.isEmpty()) {
             setStatusMessage("Username is required");
@@ -525,59 +530,86 @@ public class LoginView extends JFrame {
             return;
         }
         
-        // Show loading indicator
-        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-        loginButton.setEnabled(false);
+        if (userService == null) {
+            setStatusMessage("Service unavailable. Please try again.");
+            LogUtil.error("UserService is null during login attempt");
+            initializeRMIConnection();
+            return;
+        }
+        
+        showLoadingState(true);
         setStatusMessage("Authenticating...");
         
-        // Perform authentication in a separate thread to avoid UI freeze
         SwingWorker<User, Void> worker = new SwingWorker<User, Void>() {
             @Override
             protected User doInBackground() throws Exception {
-                // Authenticate user
-                return userDao.authenticateUser(username, password);
+                try {
+                    LogUtil.info("Attempting RMI authentication for user: " + username);
+                    return userService.authenticateUser(username, password);
+                } catch (Exception e) {
+                    LogUtil.error("RMI authentication error", e);
+                    throw e;
+                }
             }
             
             @Override
             protected void done() {
+                showLoadingState(false);
+                
                 try {
                     User user = get();
                     
-                    // Reset cursor and re-enable button
-                    setCursor(Cursor.getDefaultCursor());
-                    loginButton.setEnabled(true);
-                    
                     if (user != null) {
-                        // Authentication successful
                         setStatusMessage("");
+                        LogUtil.info("RMI authentication successful for user: " + username);
+                        LogUtil.logAuthentication(username, true);
                         
                         if (callback != null) {
                             callback.onLoginSuccess(user);
                         } else {
-                            // If no callback provided, just open the main view
-                            dispose();
-                            MainView mainView = new MainView();
-                            mainView.setVisible(true);
+                            JOptionPane.showMessageDialog(
+                                LoginView.this,
+                                "Login successful! Welcome, " + user.getFullName()+ "!",
+                                "Success",
+                                JOptionPane.INFORMATION_MESSAGE
+                            );
                         }
                     } else {
-                        // Authentication failed
                         setStatusMessage("Invalid username or password");
                         passwordField.setText("");
+                        passwordField.requestFocusInWindow();
+                        
+                        LogUtil.warn("RMI authentication failed for user: " + username);
+                        LogUtil.logAuthentication(username, false);
                         
                         if (callback != null) {
                             callback.onLoginFailure("Invalid username or password");
                         }
                         
-                        // Shake effect for failed login
                         shakeLoginButton();
                     }
                 } catch (Exception ex) {
-                    setCursor(Cursor.getDefaultCursor());
-                    loginButton.setEnabled(true);
-                    setStatusMessage("Authentication error: " + ex.getMessage());
+                    setStatusMessage("Authentication error. Please try again.");
+                    LogUtil.error("Error during RMI authentication", ex);
                     
                     if (callback != null) {
                         callback.onLoginFailure("Authentication error: " + ex.getMessage());
+                    }
+                    
+                    if (ex.getCause() instanceof java.rmi.ConnectException || 
+                        ex.getCause() instanceof java.net.ConnectException) {
+                        
+                        int result = JOptionPane.showConfirmDialog(
+                            LoginView.this,
+                            "Connection to server lost. Would you like to reconnect?",
+                            "Connection Error",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.ERROR_MESSAGE
+                        );
+                        
+                        if (result == JOptionPane.YES_OPTION) {
+                            initializeRMIConnection();
+                        }
                     }
                 }
             }
@@ -586,65 +618,196 @@ public class LoginView extends JFrame {
         worker.execute();
     }
     
-    /**
-     * Sets the status message
-     * 
-     * @param message Message to display
-     */
-    public void setStatusMessage(String message) {
-        statusLabel.setText(message);
+    private void showLoadingState(boolean loading) {
+        loginButton.setEnabled(!loading);
+        usernameField.setEnabled(!loading);
+        passwordField.setEnabled(!loading);
+        progressBar.setVisible(loading);
+        
+        if (loading) {
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        } else {
+            setCursor(Cursor.getDefaultCursor());
+        }
     }
     
-    /**
-     * Performs a shake animation on the login button for failed login attempts
-     */
+    private void handleForgotPassword() {
+        LogUtil.info("Forgot password requested");
+        
+        String email = JOptionPane.showInputDialog(
+            this,
+            "Enter your email address to reset your password:",
+            "Password Reset",
+            JOptionPane.QUESTION_MESSAGE
+        );
+        
+        if (email != null && !email.trim().isEmpty()) {
+            try {
+                if (userService != null) {
+                    User user = userService.findUserByEmail(email.trim());
+                    
+                    if (user != null) {
+                        JOptionPane.showMessageDialog(
+                            this,
+                            "Password reset instructions would be sent to: " + email + "\n\n" +
+                            "For demo purposes, please contact your administrator\n" +
+                            "to reset your password.\n\n" +
+                            "Default admin credentials:\n" +
+                            "Username: admin\n" +
+                            "Password: admin123",
+                            "Password Reset",
+                            JOptionPane.INFORMATION_MESSAGE
+                        );
+                        LogUtil.info("Password reset requested for email: " + email);
+                    } else {
+                        JOptionPane.showMessageDialog(
+                            this,
+                            "No user account found with email: " + email,
+                            "Email Not Found",
+                            JOptionPane.WARNING_MESSAGE
+                        );
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(
+                        this,
+                        "Service unavailable. Please try again later.",
+                        "Service Error",
+                        JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            } catch (Exception e) {
+                LogUtil.error("Error processing password reset request", e);
+                JOptionPane.showMessageDialog(
+                    this,
+                    "Error processing password reset request. Please try again.",
+                    "Service Error",
+                    JOptionPane.ERROR_MESSAGE
+                );
+            }
+        }
+    }
+    
+    public void setStatusMessage(String message) {
+        statusLabel.setText(message);
+        if (!message.isEmpty()) {
+            LogUtil.debug("Login status message: " + message);
+        }
+    }
+    
     private void shakeLoginButton() {
         final int amplitude = 10;
         final int cycles = 4;
         final int speed = 50;
         
-        Thread shakeThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Point originalLocation = loginButton.getLocation();
-                
-                try {
-                    for (int i = 0; i < cycles; i++) {
-                        Thread.sleep(speed);
-                        loginButton.setLocation(new Point(originalLocation.x + amplitude, originalLocation.y));
-                        
-                        Thread.sleep(speed);
-                        loginButton.setLocation(new Point(originalLocation.x - amplitude, originalLocation.y));
-                    }
+        Thread shakeThread = new Thread(() -> {
+            Point originalLocation = loginButton.getLocation();
+            
+            try {
+                for (int i = 0; i < cycles; i++) {
+                    Thread.sleep(speed);
+                    SwingUtilities.invokeLater(() -> 
+                        loginButton.setLocation(new Point(originalLocation.x + amplitude, originalLocation.y))
+                    );
                     
-                    // Return to original position
-                    loginButton.setLocation(originalLocation);
-                } catch (InterruptedException e) {
-                    // Restore original position if interrupted
-                    loginButton.setLocation(originalLocation);
+                    Thread.sleep(speed);
+                    SwingUtilities.invokeLater(() -> 
+                        loginButton.setLocation(new Point(originalLocation.x - amplitude, originalLocation.y))
+                    );
                 }
+                
+                SwingUtilities.invokeLater(() -> loginButton.setLocation(originalLocation));
+            } catch (InterruptedException e) {
+                SwingUtilities.invokeLater(() -> loginButton.setLocation(originalLocation));
             }
         });
         
+        shakeThread.setDaemon(true);
         shakeThread.start();
     }
     
-    /**
-     * Main method to launch the login view
-     * 
-     * @param args Command line arguments
-     */
+    public void setRememberMe(boolean remember) {
+        rememberMeCheckbox.setSelected(remember);
+    }
+    
+    public boolean isRememberMe() {
+        return rememberMeCheckbox.isSelected();
+    }
+    
+    public void setUsername(String username) {
+        usernameField.setText(username);
+        if (username != null && !username.isEmpty()) {
+            passwordField.requestFocusInWindow();
+        }
+    }
+    
+    public String getUsername() {
+        return usernameField.getText().trim();
+    }
+    
+    public void clearPassword() {
+        passwordField.setText("");
+    }
+    
+    public boolean isConnected() {
+        return userService != null && RMIConnectionManager.isConnected();
+    }
+    
+    public void reconnect() {
+        setStatusMessage("Reconnecting...");
+        initializeRMIConnection();
+        
+        if (isConnected()) {
+            setStatusMessage("");
+        } else {
+            setStatusMessage("Connection failed");
+        }
+    }
+    
     public static void main(String[] args) {
-        // Set up look and feel
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            
+            Font defaultFont = new Font("Segoe UI", Font.PLAIN, 12);
+            UIManager.put("Label.font", defaultFont);
+            UIManager.put("Button.font", defaultFont);
+            UIManager.put("TextField.font", defaultFont);
+            UIManager.put("PasswordField.font", defaultFont);
+            
         } catch (Exception e) {
-            e.printStackTrace();
+            LogUtil.error("Failed to set look and feel", e);
         }
         
-        // Show the login view
+        LogUtil.info("Starting LoginView test");
+        
         SwingUtilities.invokeLater(() -> {
-            LoginView loginView = new LoginView();
+            LoginView loginView = new LoginView(new LoginView.AuthenticationCallback() {
+                @Override
+                public void onLoginSuccess(User user) {
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Login successful!\nWelcome, " + user.getFullName() +"!",
+                        "Success",
+                        JOptionPane.INFORMATION_MESSAGE
+                    );
+                    System.exit(0);
+                }
+                
+                @Override
+                public void onLoginFailure(String reason) {
+                    LogUtil.warn("Login failed: " + reason);
+                }
+                
+                @Override
+                public void onCancel() {
+                    System.exit(0);
+                }
+                
+                @Override
+                public void onForgotPassword() {
+                    LogUtil.info("Forgot password action triggered");
+                }
+            });
+            
             loginView.setVisible(true);
         });
     }

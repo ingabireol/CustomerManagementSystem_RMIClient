@@ -4,11 +4,14 @@ import model.Order;
 import model.OrderItem;
 import model.Customer;
 import model.Invoice;
-import dao.OrderDao;
+import service.OrderService;
+import service.InvoiceService;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -16,14 +19,23 @@ import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.text.NumberFormat;
-import javax.swing.table.DefaultTableCellRenderer;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
 import ui.UIFactory;
 
 /**
- * Detail view for showing order information and line items.
+ * RMI-based Detail view for showing order information and line items.
  * Displays complete order details including customer information and all items ordered.
  */
 public class OrderDetailsView extends JPanel {
+    // RMI Configuration
+    private static final String RMI_HOST = "127.0.0.1";
+    private static final int RMI_PORT = 4444;
+    
+    // Remote services
+    private OrderService orderService;
+    private InvoiceService invoiceService;
+    
     // UI Components
     private JLabel orderIdValueLabel;
     private JLabel customerValueLabel;
@@ -48,7 +60,6 @@ public class OrderDetailsView extends JPanel {
     
     // Order data
     private Order order;
-    private OrderDao orderDao;
     
     // Callback for view actions
     private DetailsViewCallback callback;
@@ -72,15 +83,69 @@ public class OrderDetailsView extends JPanel {
     public OrderDetailsView(Order order, DetailsViewCallback callback) {
         this.order = order;
         this.callback = callback;
-        this.orderDao = new OrderDao();
+        
+        // Initialize RMI connections
+        initializeRMIConnection();
         
         // Load order with details if needed
-        if (order != null && (order.getOrderItems() == null || order.getOrderItems().isEmpty())) {
-            this.order = orderDao.getOrderWithDetails(order.getId());
+        if (order != null && orderService != null) {
+            loadOrderDetails();
         }
         
         initializeUI();
         populateData();
+    }
+    
+    /**
+     * Initializes the RMI connections to the server
+     */
+    private void initializeRMIConnection() {
+        try {
+            LogUtil.info("Connecting to OrderService and InvoiceService at " + RMI_HOST + ":" + RMI_PORT);
+            Registry registry = LocateRegistry.getRegistry(RMI_HOST, RMI_PORT);
+            orderService = (OrderService) registry.lookup("orderService");
+            invoiceService = (InvoiceService) registry.lookup("invoiceService");
+            LogUtil.info("Successfully connected to OrderService and InvoiceService");
+        } catch (Exception e) {
+            LogUtil.error("Failed to connect to Order/Invoice services", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error dialog
+     */
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+            this,
+            "Failed to connect to the Order Service.\nPlease ensure the server is running and try again.",
+            "Connection Error",
+            JOptionPane.ERROR_MESSAGE
+        );
+    }
+    
+    /**
+     * Loads order details with all related data
+     */
+    private void loadOrderDetails() {
+        try {
+            if (order != null && orderService != null) {
+                // Load complete order details using RMI
+                Order detailedOrder = orderService.getOrderWithDetails(order.getId());
+                if (detailedOrder != null) {
+                    this.order = detailedOrder;
+                    LogUtil.info("Order details loaded successfully for order ID: " + order.getId());
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.error("Failed to load order details", e);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error loading order details: " + e.getMessage(),
+                "Data Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
     }
     
     private void initializeUI() {
@@ -137,20 +202,12 @@ public class OrderDetailsView extends JPanel {
                 }
             };
             statusIndicator.setBorder(BorderFactory.createLineBorder(Color.BLACK, 1));
+            statusIndicator.setOpaque(true);
             
             // Set color based on status
-            String status = order.getStatus();
-            if ("Delivered".equals(status)) {
-                statusIndicator.setBackground(UIFactory.SUCCESS_COLOR);
-            } else if ("Processing".equals(status) || "Shipped".equals(status)) {
-                statusIndicator.setBackground(UIFactory.WARNING_COLOR);
-            } else if ("Cancelled".equals(status)) {
-                statusIndicator.setBackground(UIFactory.ERROR_COLOR);
-            } else {
-                statusIndicator.setBackground(UIFactory.MEDIUM_GRAY);
-            }
+            updateStatusIndicator(order.getStatus());
             
-            JLabel statusLabel = new JLabel(status);
+            JLabel statusLabel = new JLabel(order.getStatus());
             statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
             
             statusPanel.add(statusIndicator);
@@ -163,6 +220,29 @@ public class OrderDetailsView extends JPanel {
         }
         
         return panel;
+    }
+    
+    /**
+     * Updates the status indicator color based on status
+     */
+    private void updateStatusIndicator(String status) {
+        if (statusIndicator != null && status != null) {
+            switch (status) {
+                case "Delivered":
+                    statusIndicator.setBackground(UIFactory.SUCCESS_COLOR);
+                    break;
+                case "Processing":
+                case "Shipped":
+                    statusIndicator.setBackground(UIFactory.WARNING_COLOR);
+                    break;
+                case "Cancelled":
+                    statusIndicator.setBackground(UIFactory.ERROR_COLOR);
+                    break;
+                default:
+                    statusIndicator.setBackground(UIFactory.MEDIUM_GRAY);
+                    break;
+            }
+        }
     }
     
     private JPanel createMainDetailsPanel() {
@@ -203,24 +283,18 @@ public class OrderDetailsView extends JPanel {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         
         // Order ID
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.1;
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 1; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Order ID:"), gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.4;
+        gbc.gridx = 1; gbc.weightx = 0.4;
         orderIdValueLabel = createValueLabel("");
         detailsGrid.add(orderIdValueLabel, gbc);
         
         // Customer
-        gbc.gridx = 2;
-        gbc.weightx = 0.1;
+        gbc.gridx = 2; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Customer:"), gbc);
         
-        gbc.gridx = 3;
-        gbc.weightx = 0.4;
+        gbc.gridx = 3; gbc.weightx = 0.4;
         customerValueLabel = createValueLabel("");
         
         // Add view customer button
@@ -228,8 +302,7 @@ public class OrderDetailsView extends JPanel {
         customerPanel.setOpaque(false);
         customerPanel.add(customerValueLabel, BorderLayout.CENTER);
         
-        JButton viewCustomerButton = new JButton("View");
-        viewCustomerButton.setFont(UIFactory.SMALL_FONT);
+        JButton viewCustomerButton = UIFactory.createSecondaryButton("View");
         viewCustomerButton.setPreferredSize(new Dimension(60, 25));
         viewCustomerButton.addActionListener(e -> {
             if (callback != null && order != null && order.getCustomer() != null) {
@@ -241,63 +314,36 @@ public class OrderDetailsView extends JPanel {
         detailsGrid.add(customerPanel, gbc);
         
         // Order Date
-        gbc.gridx = 0;
-        gbc.gridy = 1;
-        gbc.weightx = 0.1;
+        gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Order Date:"), gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.4;
+        gbc.gridx = 1; gbc.weightx = 0.4;
         orderDateValueLabel = createValueLabel("");
         detailsGrid.add(orderDateValueLabel, gbc);
         
         // Status
-        gbc.gridx = 2;
-        gbc.weightx = 0.1;
+        gbc.gridx = 2; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Status:"), gbc);
         
-        gbc.gridx = 3;
-        gbc.weightx = 0.4;
-        
-        // Status with colored indicator
-        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        statusPanel.setOpaque(false);
-        
-        JPanel indicator = new JPanel() {
-            @Override
-            public Dimension getPreferredSize() {
-                return new Dimension(12, 12);
-            }
-        };
-        indicator.setBorder(BorderFactory.createLineBorder(Color.BLACK, 1));
-        
+        gbc.gridx = 3; gbc.weightx = 0.4;
         statusValueLabel = createValueLabel("");
-        
-        statusPanel.add(indicator);
-        statusPanel.add(statusValueLabel);
-        
-        detailsGrid.add(statusPanel, gbc);
+        detailsGrid.add(statusValueLabel, gbc);
         
         // Total Amount
-        gbc.gridx = 0;
-        gbc.gridy = 2;
-        gbc.weightx = 0.1;
+        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Total Amount:"), gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.4;
+        gbc.gridx = 1; gbc.weightx = 0.4;
         totalValueLabel = createValueLabel("");
         totalValueLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
         totalValueLabel.setForeground(UIFactory.PRIMARY_COLOR);
         detailsGrid.add(totalValueLabel, gbc);
         
         // Payment Method
-        gbc.gridx = 2;
-        gbc.weightx = 0.1;
+        gbc.gridx = 2; gbc.weightx = 0.1;
         detailsGrid.add(createLabel("Payment Method:"), gbc);
         
-        gbc.gridx = 3;
-        gbc.weightx = 0.4;
+        gbc.gridx = 3; gbc.weightx = 0.4;
         paymentMethodValueLabel = createValueLabel("");
         detailsGrid.add(paymentMethodValueLabel, gbc);
         
@@ -459,11 +505,20 @@ public class OrderDetailsView extends JPanel {
         
         JButton closeButton = UIFactory.createSecondaryButton("Close");
         JButton editButton = UIFactory.createWarningButton("Edit Order");
+        JButton refreshButton = UIFactory.createSecondaryButton("Refresh");
         
+        panel.add(refreshButton);
         panel.add(closeButton);
         panel.add(editButton);
         
         // Add button actions
+        refreshButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                refreshOrderData();
+            }
+        });
+        
         closeButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -483,6 +538,69 @@ public class OrderDetailsView extends JPanel {
         });
         
         return panel;
+    }
+    
+    /**
+     * Refreshes order data from the server
+     */
+    private void refreshOrderData() {
+        try {
+            if (order != null && orderService != null) {
+                Order refreshedOrder = orderService.getOrderWithDetails(order.getId());
+                if (refreshedOrder != null) {
+                    this.order = refreshedOrder;
+                    populateData();
+                    loadInvoices();
+                    LogUtil.info("Order data refreshed successfully");
+                } else {
+                    LogUtil.warn("Failed to refresh order data - order not found");
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.error("Error refreshing order data", e);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error refreshing order data: " + e.getMessage(),
+                "Refresh Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+    
+    /**
+     * Loads invoices for the current order using RMI
+     */
+    private void loadInvoices() {
+        try {
+            if (order != null && invoiceService != null) {
+                List<Invoice> invoices = invoiceService.findInvoicesByOrder(order);
+                populateInvoicesTable(invoices);
+                LogUtil.info("Invoices loaded successfully for order: " + order.getOrderId());
+            }
+        } catch (Exception e) {
+            LogUtil.error("Error loading invoices", e);
+            // Don't show error dialog for invoices as it's not critical
+        }
+    }
+    
+    /**
+     * Populates the invoices table
+     */
+    private void populateInvoicesTable(List<Invoice> invoices) {
+        invoicesTableModel.setRowCount(0);
+        
+        if (invoices != null) {
+            for (Invoice invoice : invoices) {
+                Object[] rowData = {
+                    invoice.getInvoiceNumber(),
+                    invoice.getIssueDate() != null ? invoice.getIssueDate().format(dateFormatter) : "",
+                    invoice.getDueDate() != null ? invoice.getDueDate().format(dateFormatter) : "",
+                    invoice.getAmount(),
+                    invoice.getStatus()
+                };
+                invoicesTableModel.addRow(rowData);
+            }
+        }
     }
     
     private JLabel createLabel(String text) {
@@ -510,8 +628,6 @@ public class OrderDetailsView extends JPanel {
         Customer customer = order.getCustomer();
         if (customer != null) {
             customerValueLabel.setText(customer.getFullName());
-        } else if (order.getCustomerId() > 0) {
-            customerValueLabel.setText("Customer ID: " + order.getCustomerId());
         } else {
             customerValueLabel.setText("No customer");
         }
@@ -521,16 +637,8 @@ public class OrderDetailsView extends JPanel {
                                  order.getOrderDate().format(dateFormatter) : "");
         statusValueLabel.setText(order.getStatus());
         
-        // Set status indicator color
-        if ("Delivered".equals(order.getStatus())) {
-            statusIndicator.setBackground(UIFactory.SUCCESS_COLOR);
-        } else if ("Processing".equals(order.getStatus()) || "Shipped".equals(order.getStatus())) {
-            statusIndicator.setBackground(UIFactory.WARNING_COLOR);
-        } else if ("Cancelled".equals(order.getStatus())) {
-            statusIndicator.setBackground(UIFactory.ERROR_COLOR);
-        } else {
-            statusIndicator.setBackground(UIFactory.MEDIUM_GRAY);
-        }
+        // Update status indicator color
+        updateStatusIndicator(order.getStatus());
         
         // Format total amount
         if (order.getTotalAmount() != null) {
@@ -547,8 +655,6 @@ public class OrderDetailsView extends JPanel {
         
         List<OrderItem> items = order.getOrderItems();
         if (items != null) {
-            NumberFormat currencyFormat = NumberFormat.getCurrencyInstance();
-            
             for (OrderItem item : items) {
                 String productCode = "";
                 String productName = "";
@@ -569,21 +675,35 @@ public class OrderDetailsView extends JPanel {
             }
         }
         
-        // Populate invoices table
-        invoicesTableModel.setRowCount(0);
-        
-        List<Invoice> invoices = order.getInvoices();
-        if (invoices != null) {
-            for (Invoice invoice : invoices) {
-                Object[] rowData = {
-                    invoice.getInvoiceNumber(),
-                    invoice.getIssueDate() != null ? invoice.getIssueDate().format(dateFormatter) : "",
-                    invoice.getDueDate() != null ? invoice.getDueDate().format(dateFormatter) : "",
-                    invoice.getAmount(),
-                    invoice.getStatus()
-                };
-                invoicesTableModel.addRow(rowData);
-            }
+        // Load invoices
+        loadInvoices();
+    }
+    
+    /**
+     * Gets the current order
+     * 
+     * @return The order being displayed
+     */
+    public Order getOrder() {
+        return order;
+    }
+    
+    /**
+     * Checks if the RMI connection is available
+     * 
+     * @return true if connected, false otherwise
+     */
+    public boolean isConnected() {
+        return orderService != null && invoiceService != null;
+    }
+    
+    /**
+     * Reconnects to the RMI server
+     */
+    public void reconnect() {
+        initializeRMIConnection();
+        if (isConnected()) {
+            refreshOrderData();
         }
     }
 }

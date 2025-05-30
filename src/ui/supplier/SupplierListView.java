@@ -1,7 +1,9 @@
 package ui.supplier;
 
 import model.Supplier;
-import dao.SupplierDao;
+import util.LogUtil;
+import util.RMIConnectionManager;
+import service.SupplierService;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -17,8 +19,8 @@ import java.util.List;
 import ui.UIFactory;
 
 /**
- * List view for displaying and managing suppliers.
- * Provides functionality for searching, filtering, and performing CRUD operations.
+ * RMI-based list view for displaying and managing suppliers.
+ * Provides functionality for searching, filtering, and performing CRUD operations using remote services.
  */
 public class SupplierListView extends JPanel {
     // Table components
@@ -37,9 +39,11 @@ public class SupplierListView extends JPanel {
     private JButton refreshButton;
     private JButton viewProductsButton;
     
-    // Supplier data and DAO
+    // Supplier data
     private List<Supplier> supplierList;
-    private SupplierDao supplierDao;
+    
+    // RMI Services
+    private SupplierService supplierService;
     
     // Callback for list actions
     private SupplierListCallback callback;
@@ -60,11 +64,44 @@ public class SupplierListView extends JPanel {
      */
     public SupplierListView(SupplierListCallback callback) {
         this.callback = callback;
-        this.supplierDao = new SupplierDao();
         this.supplierList = new ArrayList<>();
         
+        // Initialize RMI service
+        initializeRMIServices();
         initializeUI();
         loadData();
+    }
+    
+    /**
+     * Initializes RMI service connections
+     */
+    private void initializeRMIServices() {
+        try {
+            LogUtil.info("Initializing SupplierService for list view");
+            supplierService = RMIConnectionManager.getSupplierService();
+            
+            if (supplierService == null) {
+                LogUtil.error("Failed to get SupplierService from RMI");
+                showConnectionError();
+            } else {
+                LogUtil.info("Successfully connected to SupplierService");
+            }
+        } catch (Exception e) {
+            LogUtil.error("Error connecting to SupplierService", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error message
+     */
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+            this,
+            "Failed to connect to the server.\nSome features may not work properly.",
+            "Connection Error",
+            JOptionPane.ERROR_MESSAGE
+        );
     }
     
     private void initializeUI() {
@@ -87,19 +124,47 @@ public class SupplierListView extends JPanel {
     }
     
     /**
-     * Loads supplier data from the database
+     * Loads supplier data from the server using RMI
      */
     private void loadData() {
-        try {
-            this.supplierList = supplierDao.findAllSuppliers();
-            refreshTableData();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this,
-                "Error loading supplier data: " + ex.getMessage(),
-                "Database Error",
-                JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
-        }
+        SwingWorker<List<Supplier>, Void> worker = new SwingWorker<List<Supplier>, Void>() {
+            @Override
+            protected List<Supplier> doInBackground() throws Exception {
+                if (supplierService != null) {
+                    LogUtil.info("Loading suppliers from server via RMI");
+                    return supplierService.findAllSuppliers();
+                }
+                return new ArrayList<>();
+            }
+            
+            @Override
+            protected void done() {
+                try {
+                    List<Supplier> suppliers = get();
+                    if (suppliers != null) {
+                        supplierList = suppliers;
+                        refreshTableData();
+                        LogUtil.info("Loaded " + suppliers.size() + " suppliers from server");
+                    } else {
+                        LogUtil.warn("Received null supplier list from server");
+                        supplierList = new ArrayList<>();
+                        refreshTableData();
+                    }
+                } catch (Exception ex) {
+                    LogUtil.error("Error loading supplier data from server", ex);
+                    JOptionPane.showMessageDialog(SupplierListView.this,
+                        "Error loading supplier data: " + ex.getMessage(),
+                        "Server Error",
+                        JOptionPane.ERROR_MESSAGE);
+                    
+                    // Initialize with empty list
+                    supplierList = new ArrayList<>();
+                    refreshTableData();
+                }
+            }
+        };
+        
+        worker.execute();
     }
     
     private JPanel createHeaderPanel() {
@@ -134,7 +199,7 @@ public class SupplierListView extends JPanel {
         searchButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                applyFilter();
+                performSearch();
             }
         });
         
@@ -143,6 +208,14 @@ public class SupplierListView extends JPanel {
             @Override
             public void actionPerformed(ActionEvent e) {
                 applyFilter();
+            }
+        });
+        
+        // Add enter key listener to search field
+        searchField.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                performSearch();
             }
         });
         
@@ -331,6 +404,54 @@ public class SupplierListView extends JPanel {
     }
     
     /**
+     * Performs search using RMI service
+     */
+    private void performSearch() {
+        String searchText = searchField.getText().trim();
+        
+        if (searchText.isEmpty()) {
+            // If search is empty, reload all data
+            loadData();
+            return;
+        }
+        
+        SwingWorker<List<Supplier>, Void> worker = new SwingWorker<List<Supplier>, Void>() {
+            @Override
+            protected List<Supplier> doInBackground() throws Exception {
+                if (supplierService != null) {
+                    LogUtil.info("Searching suppliers by name: " + searchText);
+                    return supplierService.findSuppliersByName(searchText);
+                }
+                return new ArrayList<>();
+            }
+            
+            @Override
+            protected void done() {
+                try {
+                    List<Supplier> searchResults = get();
+                    if (searchResults != null) {
+                        supplierList = searchResults;
+                        refreshTableData();
+                        LogUtil.info("Search completed, found " + searchResults.size() + " suppliers");
+                    } else {
+                        LogUtil.warn("Search returned null results");
+                        supplierList = new ArrayList<>();
+                        refreshTableData();
+                    }
+                } catch (Exception ex) {
+                    LogUtil.error("Error searching suppliers", ex);
+                    JOptionPane.showMessageDialog(SupplierListView.this,
+                        "Error searching suppliers: " + ex.getMessage(),
+                        "Search Error",
+                        JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        };
+        
+        worker.execute();
+    }
+    
+    /**
      * Refreshes the table data with the current supplier list
      */
     private void refreshTableData() {
@@ -341,11 +462,11 @@ public class SupplierListView extends JPanel {
         for (Supplier supplier : supplierList) {
             Object[] rowData = {
                 supplier.getId(),
-                supplier.getSupplierCode(),
-                supplier.getName(),
-                supplier.getContactPerson(),
-                supplier.getEmail(),
-                supplier.getPhone()
+                supplier.getSupplierCode() != null ? supplier.getSupplierCode() : "N/A",
+                supplier.getName() != null ? supplier.getName() : "N/A",
+                supplier.getContactPerson() != null ? supplier.getContactPerson() : "N/A",
+                supplier.getEmail() != null ? supplier.getEmail() : "N/A",
+                supplier.getPhone() != null ? supplier.getPhone() : "N/A"
             };
             tableModel.addRow(rowData);
         }
@@ -366,42 +487,20 @@ public class SupplierListView extends JPanel {
     private void applyFilter() {
         RowFilter<DefaultTableModel, Object> filter = null;
         
-        // Get search text
-        String searchText = searchField.getText().trim().toLowerCase();
-        
         // Get filter selection
         String filterSelection = (String) filterComboBox.getSelectedItem();
         
-        // Combined filter for search text and filter selection
-        if (!searchText.isEmpty() || !"All Suppliers".equals(filterSelection)) {
+        // Apply filter based on selection
+        if (!"All Suppliers".equals(filterSelection)) {
             filter = new RowFilter<DefaultTableModel, Object>() {
                 @Override
                 public boolean include(Entry<? extends DefaultTableModel, ? extends Object> entry) {
-                    boolean matchesSearch = true;
-                    boolean matchesFilter = true;
-                    
-                    // Apply search text filter
-                    if (!searchText.isEmpty()) {
-                        matchesSearch = false;
-                        for (int i = 1; i < entry.getValueCount(); i++) { // Skip ID column
-                            Object value = entry.getValue(i);
-                            if (value != null && value.toString().toLowerCase().contains(searchText)) {
-                                matchesSearch = true;
-                                break;
-                            }
-                        }
+                    // In a real application, this would filter based on an active/inactive field
+                    // For this example, we'll assume all suppliers are active
+                    if ("Inactive Suppliers".equals(filterSelection)) {
+                        return false; // No inactive suppliers for now
                     }
-                    
-                    // Apply selection filter
-                    if (!"All Suppliers".equals(filterSelection)) {
-                        // In a real application, this would filter based on an active/inactive field
-                        // For this example, we'll assume all suppliers are active
-                        if ("Inactive Suppliers".equals(filterSelection)) {
-                            matchesFilter = false;
-                        }
-                    }
-                    
-                    return matchesSearch && matchesFilter;
+                    return true; // Show all suppliers for "Active Suppliers"
                 }
             };
         }
@@ -428,37 +527,58 @@ public class SupplierListView extends JPanel {
     }
     
     /**
-     * Deletes a supplier from the database
+     * Deletes a supplier using RMI service
      * 
      * @param supplier The supplier to delete
      */
     private void deleteSupplier(Supplier supplier) {
-        try {
-            int result = supplierDao.deleteSupplier(supplier.getId());
-            if (result > 0) {
-                supplierList.removeIf(s -> s.getId() == supplier.getId());
-                refreshTableData();
-                JOptionPane.showMessageDialog(this,
-                    "Supplier deleted successfully.",
-                    "Success",
-                    JOptionPane.INFORMATION_MESSAGE);
-                
-                if (callback != null) {
-                    callback.onDeleteSupplier(supplier);
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                if (supplierService != null) {
+                    LogUtil.info("Deleting supplier via RMI: " + supplier.getName());
+                    Supplier deletedSupplier = supplierService.deleteSupplier(supplier);
+                    return deletedSupplier != null;
                 }
-            } else {
-                JOptionPane.showMessageDialog(this,
-                    "Failed to delete supplier. It may be referenced by other records.",
-                    "Delete Failed",
-                    JOptionPane.ERROR_MESSAGE);
+                return false;
             }
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this,
-                "Error deleting supplier: " + ex.getMessage(),
-                "Database Error",
-                JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
-        }
+            
+            @Override
+            protected void done() {
+                try {
+                    boolean success = get();
+                    if (success) {
+                        supplierList.removeIf(s -> s.getId() == supplier.getId());
+                        refreshTableData();
+                        
+                        JOptionPane.showMessageDialog(SupplierListView.this,
+                            "Supplier deleted successfully.",
+                            "Success",
+                            JOptionPane.INFORMATION_MESSAGE);
+                        
+                        LogUtil.info("Supplier deleted successfully: " + supplier.getName());
+                        
+                        if (callback != null) {
+                            callback.onDeleteSupplier(supplier);
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(SupplierListView.this,
+                            "Failed to delete supplier. It may be referenced by other records.",
+                            "Delete Failed",
+                            JOptionPane.ERROR_MESSAGE);
+                        LogUtil.warn("Failed to delete supplier: " + supplier.getName());
+                    }
+                } catch (Exception ex) {
+                    LogUtil.error("Error deleting supplier via RMI", ex);
+                    JOptionPane.showMessageDialog(SupplierListView.this,
+                        "Error deleting supplier: " + ex.getMessage(),
+                        "Server Error",
+                        JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        };
+        
+        worker.execute();
     }
     
     /**
@@ -510,5 +630,22 @@ public class SupplierListView extends JPanel {
             supplierList.removeIf(s -> s.getId() == supplier.getId());
             refreshTableData();
         }
+    }
+    
+    /**
+     * Gets the current supplier list
+     * 
+     * @return Current list of suppliers
+     */
+    public List<Supplier> getSupplierList() {
+        return new ArrayList<>(supplierList);
+    }
+    
+    /**
+     * Refreshes RMI connection if needed
+     */
+    public void refreshConnection() {
+        initializeRMIServices();
+        loadData();
     }
 }

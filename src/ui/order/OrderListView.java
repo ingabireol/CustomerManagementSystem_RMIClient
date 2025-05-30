@@ -2,7 +2,9 @@ package ui.order;
 
 import model.Order;
 import model.Customer;
-import dao.OrderDao;
+import service.OrderService;
+import service.CustomerService;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -19,16 +21,24 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.HashMap;
-import java.util.Map;
 import java.text.NumberFormat;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
 import ui.UIFactory;
 
 /**
- * List view for displaying and managing orders.
- * Provides functionality for searching, filtering, and performing CRUD operations.
+ * RMI-based List view for displaying and managing orders.
+ * Provides functionality for searching, filtering, and performing CRUD operations using RMI services.
  */
 public class OrderListView extends JPanel {
+    // RMI Configuration
+    private static final String RMI_HOST = "127.0.0.1";
+    private static final int RMI_PORT = 4444;
+    
+    // Remote services
+    private OrderService orderService;
+    private CustomerService customerService;
+    
     // Table components
     private JTable orderTable;
     private DefaultTableModel tableModel;
@@ -49,9 +59,8 @@ public class OrderListView extends JPanel {
     private JButton viewDetailsButton;
     private JButton createInvoiceButton;
     
-    // Order data and DAO
+    // Order data
     private List<Order> orderList;
-    private OrderDao orderDao;
     
     // Date formatter
     private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -75,11 +84,41 @@ public class OrderListView extends JPanel {
      */
     public OrderListView(OrderListCallback callback) {
         this.callback = callback;
-        this.orderDao = new OrderDao();
         this.orderList = new ArrayList<>();
+        
+        // Initialize RMI connections
+        initializeRMIConnection();
         
         initializeUI();
         loadData();
+    }
+    
+    /**
+     * Initializes the RMI connections to the server
+     */
+    private void initializeRMIConnection() {
+        try {
+            LogUtil.info("Connecting to OrderService and CustomerService at " + RMI_HOST + ":" + RMI_PORT);
+            Registry registry = LocateRegistry.getRegistry(RMI_HOST, RMI_PORT);
+            orderService = (OrderService) registry.lookup("orderService");
+            customerService = (CustomerService) registry.lookup("customerService");
+            LogUtil.info("Successfully connected to OrderService and CustomerService");
+        } catch (Exception e) {
+            LogUtil.error("Failed to connect to Order services", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error dialog
+     */
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+            this,
+            "Failed to connect to the Order Service.\nPlease ensure the server is running and try again.",
+            "Connection Error",
+            JOptionPane.ERROR_MESSAGE
+        );
     }
     
     private void initializeUI() {
@@ -113,18 +152,23 @@ public class OrderListView extends JPanel {
     }
     
     /**
-     * Loads order data from the database
+     * Loads order data from RMI service
      */
     private void loadData() {
         try {
-            this.orderList = orderDao.findAllOrders();
-            refreshTableData();
+            if (orderService != null) {
+                this.orderList = orderService.findAllOrders();
+                refreshTableData();
+                LogUtil.info("Loaded " + orderList.size() + " orders");
+            } else {
+                LogUtil.warn("OrderService is not available");
+            }
         } catch (Exception ex) {
+            LogUtil.error("Error loading order data", ex);
             JOptionPane.showMessageDialog(this,
                 "Error loading order data: " + ex.getMessage(),
                 "Database Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
@@ -668,34 +712,36 @@ public class OrderListView extends JPanel {
     }
     
     /**
-     * Delete an order from the database
+     * Delete an order using RMI service
      */
     private void deleteOrder(Order order) {
         try {
-            boolean result = orderDao.deleteOrder(order.getId()) > 0;
-            if (result) {
-                orderList.removeIf(o -> o.getId() == order.getId());
-                refreshTableData();
-                JOptionPane.showMessageDialog(this,
-                    "Order deleted successfully.",
-                    "Success",
-                    JOptionPane.INFORMATION_MESSAGE);
-                
-                if (callback != null) {
-                    callback.onDeleteOrder(order);
+            if (orderService != null) {
+                Order deletedOrder = orderService.deleteOrder(order);
+                if (deletedOrder != null) {
+                    orderList.removeIf(o -> o.getId() == order.getId());
+                    refreshTableData();
+                    JOptionPane.showMessageDialog(this,
+                        "Order deleted successfully.",
+                        "Success",
+                        JOptionPane.INFORMATION_MESSAGE);
+                    
+                    if (callback != null) {
+                        callback.onDeleteOrder(order);
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(this,
+                        "Failed to delete order. It may be referenced by other records.",
+                        "Delete Failed",
+                        JOptionPane.ERROR_MESSAGE);
                 }
-            } else {
-                JOptionPane.showMessageDialog(this,
-                    "Failed to delete order. It may be referenced by other records.",
-                    "Delete Failed",
-                    JOptionPane.ERROR_MESSAGE);
             }
         } catch (Exception ex) {
+            LogUtil.error("Error deleting order", ex);
             JOptionPane.showMessageDialog(this,
                 "Error deleting order: " + ex.getMessage(),
                 "Database Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
@@ -854,8 +900,6 @@ public class OrderListView extends JPanel {
                     }
                     
                     // Apply date range filter
-                    // Apply date range filter
-                   // Apply date range filter
                     if (!"All Time".equals(dateRangeSelection) && (finalFromDate != null || finalToDate != null)) {
                         String dateString = entry.getStringValue(3); // Date column (index 3)
                         if (dateString == null || dateString.isEmpty()) {
@@ -932,6 +976,14 @@ public class OrderListView extends JPanel {
     }
     
     /**
+     * Removes an order from the list view
+     */
+    public void removeOrder(Order order) {
+        orderList.removeIf(o -> o.getId() == order.getId());
+        refreshTableData();
+    }
+    
+    /**
      * Updates multiple orders in the list view
      */
     public void updateOrders(List<Order> orders) {
@@ -939,10 +991,8 @@ public class OrderListView extends JPanel {
             return;
         }
         
-        // Update existing orders or add new ones
-        for (Order order : orders) {
-            updateOrder(order);
-        }
+        this.orderList = orders;
+        refreshTableData();
     }
     
     /**
@@ -958,5 +1008,170 @@ public class OrderListView extends JPanel {
                 break;
             }
         }
+    }
+    
+    /**
+     * Searches for orders by various criteria using RMI
+     */
+    public void searchOrders(String searchText) {
+        try {
+            if (orderService != null && searchText != null && !searchText.trim().isEmpty()) {
+                // You can implement specific search methods in the OrderService
+                // For now, we'll filter the current list
+                applyFilters();
+                LogUtil.info("Search applied for: " + searchText);
+            } else {
+                // Reset to show all orders
+                loadData();
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error searching orders", ex);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error searching orders: " + ex.getMessage(),
+                "Search Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+    
+    /**
+     * Finds orders by status using RMI
+     */
+    public void findOrdersByStatus(String status) {
+        try {
+            if (orderService != null && status != null && !status.equals("All Orders")) {
+                List<Order> orders = orderService.findOrdersByStatus(status);
+                if (orders != null) {
+                    updateOrders(orders);
+                    LogUtil.info("Found " + orders.size() + " orders with status: " + status);
+                }
+            } else {
+                loadData(); // Load all orders
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error finding orders by status", ex);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error finding orders by status: " + ex.getMessage(),
+                "Search Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+    
+    /**
+     * Finds orders by date range using RMI
+     */
+    public void findOrdersByDateRange(LocalDate startDate, LocalDate endDate) {
+        try {
+            if (orderService != null && startDate != null && endDate != null) {
+                List<Order> orders = orderService.findOrdersByDateRange(startDate, endDate);
+                if (orders != null) {
+                    updateOrders(orders);
+                    LogUtil.info("Found " + orders.size() + " orders in date range: " + 
+                               startDate + " to " + endDate);
+                }
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error finding orders by date range", ex);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error finding orders by date range: " + ex.getMessage(),
+                "Search Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+    
+    /**
+     * Finds orders by customer using RMI
+     */
+    public void findOrdersByCustomer(Customer customer) {
+        try {
+            if (orderService != null && customer != null) {
+                List<Order> orders = orderService.findOrdersByCustomer(customer);
+                if (orders != null) {
+                    updateOrders(orders);
+                    LogUtil.info("Found " + orders.size() + " orders for customer: " + 
+                               customer.getFullName());
+                }
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error finding orders by customer", ex);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error finding orders by customer: " + ex.getMessage(),
+                "Search Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+    
+    /**
+     * Gets the current order list
+     * 
+     * @return List of orders currently displayed
+     */
+    public List<Order> getOrderList() {
+        return new ArrayList<>(orderList);
+    }
+    
+    /**
+     * Gets the selected order
+     * 
+     * @return The currently selected order, or null if none selected
+     */
+    public Order getSelectedOrder() {
+        int selectedRow = orderTable.getSelectedRow();
+        if (selectedRow >= 0) {
+            selectedRow = orderTable.convertRowIndexToModel(selectedRow);
+            return getOrderAtRow(selectedRow);
+        }
+        return null;
+    }
+    
+    /**
+     * Refreshes the data by reloading from the server
+     */
+    public void refreshData() {
+        loadData();
+    }
+    
+    /**
+     * Checks if the RMI connection is available
+     * 
+     * @return true if connected, false otherwise
+     */
+    public boolean isConnected() {
+        return orderService != null && customerService != null;
+    }
+    
+    /**
+     * Reconnects to the RMI server
+     */
+    public void reconnect() {
+        initializeRMIConnection();
+        if (isConnected()) {
+            loadData();
+        }
+    }
+    
+    /**
+     * Gets the OrderService instance
+     * 
+     * @return The OrderService
+     */
+    public OrderService getOrderService() {
+        return orderService;
+    }
+    
+    /**
+     * Gets the CustomerService instance
+     * 
+     * @return The CustomerService
+     */
+    public CustomerService getCustomerService() {
+        return customerService;
     }
 }

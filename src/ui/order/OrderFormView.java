@@ -4,9 +4,10 @@ import model.Order;
 import model.OrderItem;
 import model.Product;
 import model.Customer;
-import dao.OrderDao;
-import dao.CustomerDao;
-import dao.ProductDao;
+import service.OrderService;
+import service.CustomerService;
+import service.ProductService;
+import util.LogUtil;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -20,14 +21,25 @@ import java.time.format.DateTimeFormatter;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
 import ui.UIFactory;
 import ui.DialogFactory;
 
 /**
- * Form view for creating and editing order records.
- * Provides fields for all order properties and manages order items.
+ * RMI-based Form view for creating and editing order records.
+ * Provides fields for all order properties and manages order items using RMI services.
  */
 public class OrderFormView extends JPanel {
+    // RMI Configuration
+    private static final String RMI_HOST = "127.0.0.1";
+    private static final int RMI_PORT = 4444;
+    
+    // Remote services
+    private OrderService orderService;
+    private CustomerService customerService;
+    private ProductService productService;
+    
     // Form components
     private JTextField orderIdField;
     private JComboBox<Customer> customerComboBox;
@@ -61,11 +73,6 @@ public class OrderFormView extends JPanel {
     private boolean editMode = false;
     private Order currentOrder;
     
-    // Data access
-    private OrderDao orderDao;
-    private CustomerDao customerDao;
-    private ProductDao productDao;
-    
     // Callback for form submission
     private FormSubmissionCallback callback;
     
@@ -84,12 +91,13 @@ public class OrderFormView extends JPanel {
      */
     public OrderFormView(FormSubmissionCallback callback) {
         this.callback = callback;
-        this.orderDao = new OrderDao();
-        this.customerDao = new CustomerDao();
-        this.productDao = new ProductDao();
         this.editMode = false;
         
+        // Initialize RMI connections
+        initializeRMIConnection();
+        
         initializeUI();
+        loadFormData();
         setupInitialValues();
     }
     
@@ -101,19 +109,73 @@ public class OrderFormView extends JPanel {
      */
     public OrderFormView(Order order, FormSubmissionCallback callback) {
         this.callback = callback;
-        this.orderDao = new OrderDao();
-        this.customerDao = new CustomerDao();
-        this.productDao = new ProductDao();
         this.editMode = true;
         this.currentOrder = order;
         
+        // Initialize RMI connections
+        initializeRMIConnection();
+        
         // Load complete order details if needed
-        if (order != null && (order.getOrderItems() == null || order.getOrderItems().isEmpty())) {
-            this.currentOrder = orderDao.getOrderWithDetails(order.getId());
+        if (order != null && orderService != null) {
+            loadOrderDetails();
         }
         
         initializeUI();
+        loadFormData();
         populateFields(this.currentOrder);
+    }
+    
+    /**
+     * Initializes the RMI connections to the server
+     */
+    private void initializeRMIConnection() {
+        try {
+            LogUtil.info("Connecting to Order services at " + RMI_HOST + ":" + RMI_PORT);
+            Registry registry = LocateRegistry.getRegistry(RMI_HOST, RMI_PORT);
+            orderService = (OrderService) registry.lookup("orderService");
+            customerService = (CustomerService) registry.lookup("customerService");
+            productService = (ProductService) registry.lookup("productService");
+            LogUtil.info("Successfully connected to Order services");
+        } catch (Exception e) {
+            LogUtil.error("Failed to connect to Order services", e);
+            showConnectionError();
+        }
+    }
+    
+    /**
+     * Shows connection error dialog
+     */
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+            this,
+            "Failed to connect to the Order Service.\nPlease ensure the server is running and try again.",
+            "Connection Error",
+            JOptionPane.ERROR_MESSAGE
+        );
+    }
+    
+    /**
+     * Loads order details with all related data
+     */
+    private void loadOrderDetails() {
+        try {
+            if (currentOrder != null && orderService != null) {
+                // Load complete order details using RMI
+                Order detailedOrder = orderService.getOrderWithDetails(currentOrder.getId());
+                if (detailedOrder != null) {
+                    this.currentOrder = detailedOrder;
+                    LogUtil.info("Order details loaded successfully for order ID: " + currentOrder.getId());
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.error("Failed to load order details", e);
+            JOptionPane.showMessageDialog(
+                this,
+                "Error loading order details: " + e.getMessage(),
+                "Data Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+        }
     }
     
     private void initializeUI() {
@@ -172,37 +234,27 @@ public class OrderFormView extends JPanel {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         
         // Order ID field
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.15;
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 1; gbc.weightx = 0.15;
         JLabel orderIdLabel = new JLabel("Order ID:");
         sectionPanel.add(orderIdLabel, gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx = 1; gbc.weightx = 0.35;
         orderIdField = new JTextField();
         orderIdField.setEnabled(!editMode); // Disable in edit mode
         sectionPanel.add(orderIdField, gbc);
         
-        gbc.gridx = 2;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.5;
+        gbc.gridx = 2; gbc.gridwidth = 1; gbc.weightx = 0.5;
         orderIdValidationLabel = new JLabel("");
         orderIdValidationLabel.setForeground(UIFactory.ERROR_COLOR);
         orderIdValidationLabel.setFont(UIFactory.SMALL_FONT);
         sectionPanel.add(orderIdValidationLabel, gbc);
         
         // Customer field
-        gbc.gridx = 0;
-        gbc.gridy = 1;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.15;
+        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 1; gbc.weightx = 0.15;
         JLabel customerLabel = new JLabel("Customer:");
         sectionPanel.add(customerLabel, gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx = 1; gbc.weightx = 0.35;
         
         // Add customer combo box
         customerComboBox = new JComboBox<>();
@@ -220,68 +272,54 @@ public class OrderFormView extends JPanel {
             }
         });
         
-        // Load customers
-        loadCustomers();
-        
         sectionPanel.add(customerComboBox, gbc);
         
-        gbc.gridx = 2;
-        gbc.weightx = 0.5;
+        gbc.gridx = 2; gbc.weightx = 0.5;
         customerValidationLabel = new JLabel("");
         customerValidationLabel.setForeground(UIFactory.ERROR_COLOR);
         customerValidationLabel.setFont(UIFactory.SMALL_FONT);
         sectionPanel.add(customerValidationLabel, gbc);
         
         // Order date field
-        gbc.gridx = 0;
-        gbc.gridy = 2;
-        gbc.weightx = 0.15;
+        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0.15;
         JLabel orderDateLabel = new JLabel("Order Date:");
         sectionPanel.add(orderDateLabel, gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx = 1; gbc.weightx = 0.35;
         orderDateField = UIFactory.createDateField("YYYY-MM-DD");
         sectionPanel.add(orderDateField, gbc);
         
-        gbc.gridx = 2;
-        gbc.weightx = 0.5;
+        gbc.gridx = 2; gbc.weightx = 0.5;
         dateValidationLabel = new JLabel("");
         dateValidationLabel.setForeground(UIFactory.ERROR_COLOR);
         dateValidationLabel.setFont(UIFactory.SMALL_FONT);
         sectionPanel.add(dateValidationLabel, gbc);
         
         // Status field
-        gbc.gridx = 0;
-        gbc.gridy = 3;
-        gbc.weightx = 0.15;
+        gbc.gridx = 0; gbc.gridy = 3; gbc.weightx = 0.15;
         JLabel statusLabel = new JLabel("Status:");
         sectionPanel.add(statusLabel, gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx = 1; gbc.weightx = 0.35;
         String[] statuses = {
-            Order.STATUS_PENDING,
-            Order.STATUS_PROCESSING,
-            Order.STATUS_SHIPPED,
-            Order.STATUS_DELIVERED,
-            Order.STATUS_CANCELLED
+            "Pending",
+            "Processing", 
+            "Shipped",
+            "Delivered",
+            "Cancelled"
         };
         statusComboBox = UIFactory.createComboBox(statuses);
         sectionPanel.add(statusComboBox, gbc);
         
         // Payment method field
-        gbc.gridx = 0;
-        gbc.gridy = 4;
-        gbc.weightx = 0.15;
+        gbc.gridx = 0; gbc.gridy = 4; gbc.weightx = 0.15;
         JLabel paymentMethodLabel = new JLabel("Payment Method:");
         sectionPanel.add(paymentMethodLabel, gbc);
         
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx = 1; gbc.weightx = 0.35;
         String[] paymentMethods = {
             "Credit Card",
-            "Debit Card",
+            "Debit Card", 
             "PayPal",
             "Bank Transfer",
             "Cash on Delivery"
@@ -430,42 +468,50 @@ public class OrderFormView extends JPanel {
     }
     
     /**
-     * Loads all customers for the combo box
+     * Loads form data from RMI services
+     */
+    private void loadFormData() {
+        loadCustomers();
+    }
+    
+    /**
+     * Loads all customers for the combo box using RMI
      */
     private void loadCustomers() {
         try {
-            List<Customer> customers = customerDao.findAllCustomers();
-            
-            DefaultComboBoxModel<Customer> model = new DefaultComboBoxModel<>();
-            for (Customer customer : customers) {
-                model.addElement(customer);
+            if (customerService != null) {
+                List<Customer> customers = customerService.findAllCustomers();
+                
+                DefaultComboBoxModel<Customer> model = new DefaultComboBoxModel<>();
+                for (Customer customer : customers) {
+                    model.addElement(customer);
+                }
+                
+                customerComboBox.setModel(model);
+                LogUtil.info("Loaded " + customers.size() + " customers");
             }
-            
-            customerComboBox.setModel(model);
-            
         } catch (Exception ex) {
+            LogUtil.error("Error loading customers", ex);
             JOptionPane.showMessageDialog(this,
                 "Error loading customers: " + ex.getMessage(),
                 "Database Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
     /**
-     * Shows dialog to add a new item to the order
+     * Shows dialog to add a new item to the order using RMI
      */
     private void showAddItemDialog() {
         // Create a product selection dialog
-       Window parentWindow = SwingUtilities.getWindowAncestor(this);
-       JDialog dialog; 
+        Window parentWindow = SwingUtilities.getWindowAncestor(this);
+        JDialog dialog; 
 
-       if (parentWindow instanceof Frame) {
+        if (parentWindow instanceof Frame) {
             dialog = new JDialog((Frame) parentWindow, "Add Product", true);
         } else if (parentWindow instanceof Dialog) {
             dialog = new JDialog((Dialog) parentWindow, "Add Product", true);
         } else {
-            // Fallback to a new dialog without a parent
             dialog = new JDialog();
             dialog.setTitle("Add Product");
             dialog.setModal(true);
@@ -509,19 +555,8 @@ public class OrderFormView extends JPanel {
             }
         });
         
-        // Load products
-        try {
-            List<Product> products = productDao.findAllProducts();
-            for (Product product : products) {
-                productListModel.addElement(product);
-            }
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(dialog,
-                "Error loading products: " + ex.getMessage(),
-                "Database Error",
-                JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
-        }
+        // Load products using RMI
+        loadProductsForDialog(productListModel);
         
         JScrollPane scrollPane = UIFactory.createScrollPane(productList);
         selectionPanel.add(scrollPane, BorderLayout.CENTER);
@@ -552,30 +587,8 @@ public class OrderFormView extends JPanel {
         
         // Add search functionality
         searchButton.addActionListener(e -> {
-            String searchText = searchField.getText().trim().toLowerCase();
-            if (searchText.isEmpty()) {
-                // Reset list
-                productListModel.clear();
-                try {
-                    List<Product> products = productDao.findAllProducts();
-                    for (Product product : products) {
-                        productListModel.addElement(product);
-                    }
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            } else {
-                // Search by name
-                try {
-                    List<Product> products = productDao.findProductsByName(searchText);
-                    productListModel.clear();
-                    for (Product product : products) {
-                        productListModel.addElement(product);
-                    }
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            }
+            String searchText = searchField.getText().trim();
+            searchProducts(productListModel, searchText);
         });
         
         // Register button actions
@@ -614,6 +627,52 @@ public class OrderFormView extends JPanel {
     }
     
     /**
+     * Loads products using RMI service
+     */
+    private void loadProductsForDialog(DefaultListModel<Product> model) {
+        try {
+            if (productService != null) {
+                List<Product> products = productService.findAllProducts();
+                model.clear();
+                for (Product product : products) {
+                    model.addElement(product);
+                }
+                LogUtil.info("Loaded " + products.size() + " products for dialog");
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error loading products", ex);
+            JOptionPane.showMessageDialog(this,
+                "Error loading products: " + ex.getMessage(),
+                "Database Error",
+                JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    /**
+     * Searches products using RMI service
+     */
+    private void searchProducts(DefaultListModel<Product> model, String searchText) {
+        try {
+            if (productService != null) {
+                List<Product> products;
+                if (searchText.isEmpty()) {
+                    products = productService.findAllProducts();
+                } else {
+                    products = productService.findProductsByName(searchText);
+                }
+                
+                model.clear();
+                for (Product product : products) {
+                    model.addElement(product);
+                }
+                LogUtil.info("Search completed, found " + products.size() + " products");
+            }
+        } catch (Exception ex) {
+            LogUtil.error("Error searching products", ex);
+        }
+    }
+    
+    /**
      * Adds an order item to the order
      * 
      * @param product The product to add
@@ -623,7 +682,7 @@ public class OrderFormView extends JPanel {
         // Check if product already exists in order
         for (int i = 0; i < orderItems.size(); i++) {
             OrderItem item = orderItems.get(i);
-            if (item.getProductId() == product.getId()) {
+            if (item.getProduct() != null && item.getProduct().getId() == product.getId()) {
                 // Update existing item quantity
                 int newQuantity = item.getQuantity() + quantity;
                 item.setQuantity(newQuantity);
@@ -635,7 +694,10 @@ public class OrderFormView extends JPanel {
         }
         
         // Create new order item
-        OrderItem item = new OrderItem(product, quantity);
+        OrderItem item = new OrderItem();
+        item.setProduct(product);
+        item.setQuantity(quantity);
+        item.setUnitPrice(product.getPrice());
         orderItems.add(item);
         
         // Add to table
@@ -694,7 +756,7 @@ public class OrderFormView extends JPanel {
         orderDateField.setText(LocalDate.now().format(dateFormatter));
         
         // Set default status to Pending
-        statusComboBox.setSelectedItem(Order.STATUS_PENDING);
+        statusComboBox.setSelectedItem("Pending");
         
         // Set default payment method
         paymentMethodComboBox.setSelectedIndex(0);
@@ -724,11 +786,14 @@ public class OrderFormView extends JPanel {
                 orderIdValidationLabel.setText("Order ID is required");
                 isValid = false;
             } else {
-                // Check if order ID already exists
-                Order existingOrder = orderDao.findOrderByOrderId(orderIdField.getText().trim());
-                if (existingOrder != null) {
-                    orderIdValidationLabel.setText("Order ID already exists");
-                    isValid = false;
+                // Check if order ID already exists using RMI
+                try {
+                    if (orderService != null && orderService.orderIdExists(orderIdField.getText().trim())) {
+                        orderIdValidationLabel.setText("Order ID already exists");
+                        isValid = false;
+                    }
+                } catch (Exception e) {
+                    LogUtil.error("Error checking order ID existence", e);
                 }
             }
         }
@@ -765,7 +830,7 @@ public class OrderFormView extends JPanel {
     }
     
     /**
-     * Saves the order to the database
+     * Saves the order using RMI service
      */
     private void saveOrder() {
         try {
@@ -789,25 +854,23 @@ public class OrderFormView extends JPanel {
             order.setOrderItems(new ArrayList<>(orderItems));
             
             // Calculate total amount
-            order.recalculateTotal();
+            BigDecimal total = BigDecimal.ZERO;
+            for (OrderItem item : orderItems) {
+                total = total.add(item.getSubtotal());
+            }
+            order.setTotalAmount(total);
             
-            int result;
+            Order savedOrder;
             
             if (editMode) {
-                result = orderDao.updateOrder(order);
-                
-                // Update each order item
-                if (result > 0) {
-                    // Handle order items updates - more complex in real app
-                    // This simple example assumes items are managed separately
-                }
+                savedOrder = orderService.updateOrder(order);
             } else {
-                result = orderDao.createOrder(order);
+                savedOrder = orderService.createOrder(order);
             }
             
-            if (result > 0) {
+            if (savedOrder != null) {
                 if (callback != null) {
-                    callback.onSave(order);
+                    callback.onSave(savedOrder);
                 }
             } else {
                 JOptionPane.showMessageDialog(this,
@@ -816,11 +879,11 @@ public class OrderFormView extends JPanel {
                     JOptionPane.ERROR_MESSAGE);
             }
         } catch (Exception ex) {
+            LogUtil.error("Error saving order", ex);
             JOptionPane.showMessageDialog(this,
                 "Error saving order: " + ex.getMessage(),
                 "Database Error",
                 JOptionPane.ERROR_MESSAGE);
-            ex.printStackTrace();
         }
     }
     
@@ -841,7 +904,7 @@ public class OrderFormView extends JPanel {
         if (order.getCustomer() != null) {
             for (int i = 0; i < customerComboBox.getItemCount(); i++) {
                 Customer customer = customerComboBox.getItemAt(i);
-                if (customer.getId() == order.getCustomerId()) {
+                if (customer.getId() == order.getCustomer().getId()) {
                     customerComboBox.setSelectedIndex(i);
                     break;
                 }
@@ -881,5 +944,24 @@ public class OrderFormView extends JPanel {
         
         // Update order total
         updateOrderTotal();
+    }
+    
+    /**
+     * Checks if the RMI connection is available
+     * 
+     * @return true if connected, false otherwise
+     */
+    public boolean isConnected() {
+        return orderService != null && customerService != null && productService != null;
+    }
+    
+    /**
+     * Reconnects to the RMI server
+     */
+    public void reconnect() {
+        initializeRMIConnection();
+        if (isConnected()) {
+            loadFormData();
+        }
     }
 }
