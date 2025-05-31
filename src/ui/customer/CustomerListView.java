@@ -3,6 +3,7 @@ package ui.customer;
 import model.Customer;
 import service.CustomerService;
 import util.LogUtil;
+import util.TableExportManager;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -23,7 +24,7 @@ import ui.UIFactory;
 
 /**
  * List view for displaying and managing customers using RMI services.
- * Provides functionality for searching, filtering, and performing CRUD operations with remote data access.
+ * Includes modern export functionality for CSV, Excel, PDF, and HTML formats.
  */
 public class CustomerListView extends JPanel {
     
@@ -49,6 +50,8 @@ public class CustomerListView extends JPanel {
     private JButton deleteButton;
     private JButton refreshButton;
     private JButton viewOrdersButton;
+    private JButton exportButton;
+    private JButton printButton;
     
     // Customer data
     private List<Customer> customerList;
@@ -120,8 +123,10 @@ public class CustomerListView extends JPanel {
      */
     private void showConnectionError() {
         // Clear table and show error message
-        tableModel.setRowCount(0);
-        tableModel.addRow(new Object[]{"Connection Error", "Unable to connect to server", "", "", "", ""});
+        if (tableModel != null) {
+            tableModel.setRowCount(0);
+            tableModel.addRow(new Object[]{"Connection Error", "Unable to connect to server", "", "", "", ""});
+        }
         
         // Disable action buttons
         setButtonsEnabled(false);
@@ -138,6 +143,8 @@ public class CustomerListView extends JPanel {
         if (editButton != null) editButton.setEnabled(false); // Always disabled until selection
         if (deleteButton != null) deleteButton.setEnabled(false); // Always disabled until selection
         if (viewOrdersButton != null) viewOrdersButton.setEnabled(false); // Always disabled until selection
+        if (exportButton != null) exportButton.setEnabled(enabled && customerTable != null);
+        if (printButton != null) printButton.setEnabled(enabled && customerTable != null);
     }
     
     /**
@@ -164,11 +171,11 @@ public class CustomerListView extends JPanel {
         setBackground(UIFactory.BACKGROUND_COLOR);
         setBorder(new EmptyBorder(10, 10, 10, 10));
         
-        // Create the header panel
+        // Create the header panel with export functionality
         JPanel headerPanel = createHeaderPanel();
         add(headerPanel, BorderLayout.NORTH);
         
-        // Create the table panel
+        // Create the table panel with export toolbar
         JPanel tablePanel = createTablePanel();
         add(tablePanel, BorderLayout.CENTER);
         
@@ -373,15 +380,11 @@ public class CustomerListView extends JPanel {
     }
     
     /**
-     * Creates the table panel
+     * Creates the table panel with enhanced export functionality
      */
     private JPanel createTablePanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(Color.WHITE);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(0xE0E0E0), 1, true),
-            new EmptyBorder(0, 0, 0, 0)
-        ));
         
         // Create the table model with column names
         String[] columnNames = {"ID", "Customer ID", "Name", "Email", "Phone", "Registration Date"};
@@ -392,7 +395,7 @@ public class CustomerListView extends JPanel {
             }
         };
         
-        // Create and set up the table
+        // Create and set up the table with export functionality
         customerTable = UIFactory.createStyledTable(tableModel);
         
         // Add row sorting
@@ -431,6 +434,10 @@ public class CustomerListView extends JPanel {
                 viewOrdersButton.setEnabled(hasSelection && isConnected);
             }
         });
+        
+        // Create toolbar with export functionality
+        JPanel toolbarPanel = UIFactory.createListViewToolbar(customerTable, "Customer List");
+        panel.add(toolbarPanel, BorderLayout.NORTH);
         
         // Add the table to a scroll pane
         JScrollPane scrollPane = UIFactory.createScrollPane(customerTable);
@@ -475,6 +482,22 @@ public class CustomerListView extends JPanel {
         
         refreshButton = UIFactory.createSecondaryButton("Refresh");
         
+        // Enhanced export button with multiple format options
+        exportButton = UIFactory.createExportButton(customerTable, "Customer List");
+        
+        // Print button for quick printing
+        printButton = UIFactory.createSecondaryButton("Print");
+        printButton.addActionListener(e -> {
+            try {
+                customerTable.print(JTable.PrintMode.FIT_WIDTH, null, null);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this,
+                    "Print failed: " + ex.getMessage(),
+                    "Print Error",
+                    JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        
         viewOrdersButton = UIFactory.createSecondaryButton("View Orders");
         viewOrdersButton.setEnabled(false); // Disabled until selection
         
@@ -488,6 +511,8 @@ public class CustomerListView extends JPanel {
         
         // Add buttons to panel
         buttonsPanel.add(refreshButton);
+        buttonsPanel.add(exportButton);
+        buttonsPanel.add(printButton);
         buttonsPanel.add(viewOrdersButton);
         buttonsPanel.add(deleteButton);
         buttonsPanel.add(editButton);
@@ -712,6 +737,39 @@ public class CustomerListView extends JPanel {
         
         // Apply any current filter
         applyFilter();
+        
+        // Update toolbar with new row count
+        updateToolbarRowCount();
+    }
+    
+    /**
+     * Updates the row count in the toolbar
+     */
+    private void updateToolbarRowCount() {
+        // Find the toolbar and update row count
+        Component[] components = this.getComponents();
+        for (Component comp : components) {
+            if (comp instanceof JPanel) {
+                JPanel panel = (JPanel) comp;
+                // Look for the table panel which contains the toolbar
+                Component[] panelComponents = panel.getComponents();
+                for (Component panelComp : panelComponents) {
+                    if (panelComp instanceof JPanel) {
+                        JPanel subPanel = (JPanel) panelComp;
+                        Component[] subComponents = subPanel.getComponents();
+                        for (Component subComp : subComponents) {
+                            if (subComp instanceof JLabel) {
+                                JLabel label = (JLabel) subComp;
+                                if (label.getText().contains("rows")) {
+                                    label.setText(customerTable.getRowCount() + " rows");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /**
@@ -728,6 +786,8 @@ public class CustomerListView extends JPanel {
         }
         return null;
     }
+    
+    // Public API methods for external interaction
     
     /**
      * Updates the customer list and refreshes the table
@@ -812,5 +872,37 @@ public class CustomerListView extends JPanel {
             return getCustomerAtRow(selectedRow);
         }
         return null;
+    }
+    
+    /**
+     * Exports the current customer list to the specified format
+     * This is a convenience method for programmatic export
+     */
+    public void exportCustomers(String format, String filename) {
+        try {
+            java.io.File file = new java.io.File(filename);
+            
+            switch (format.toLowerCase()) {
+                case "csv":
+                    TableExportManager.quickExportCSV(customerTable, "Customer List", file);
+                    break;
+                case "excel":
+                case "xls":
+                    TableExportManager.quickExportExcel(customerTable, "Customer List", file);
+                    break;
+                case "pdf":
+                case "html":
+                    TableExportManager.quickExportPDF(customerTable, "Customer List", file);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unsupported format: " + format);
+            }
+            
+            LogUtil.info("Customer list exported to " + format.toUpperCase() + ": " + filename);
+            
+        } catch (Exception e) {
+            LogUtil.error("Error exporting customer list", e);
+            throw new RuntimeException("Export failed: " + e.getMessage(), e);
+        }
     }
 }

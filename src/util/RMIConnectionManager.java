@@ -1,14 +1,20 @@
 package util;
 
 import service.*;
+
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.ConnectException;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Utility class for managing RMI connections to the server.
- * Provides centralized connection management and service lookups.
+ * Enhanced utility class for managing RMI connections to the Business Management Server.
+ * Provides centralized connection management and service lookup with OTP support.
+ * 
+ * Compatible with existing RMIConnectionManager while adding enhanced features.
  */
 public class RMIConnectionManager {
     
@@ -19,8 +25,9 @@ public class RMIConnectionManager {
     // Service cache
     private static final Map<String, Object> serviceCache = new HashMap<>();
     private static Registry registry = null;
+    private static boolean connected = false;
     
-    // Service names
+    // Service names (keeping existing constants for compatibility)
     public static final String USER_SERVICE = "userService";
     public static final String CUSTOMER_SERVICE = "customerService";
     public static final String PRODUCT_SERVICE = "productService";
@@ -28,6 +35,7 @@ public class RMIConnectionManager {
     public static final String ORDER_SERVICE = "orderService";
     public static final String INVOICE_SERVICE = "invoiceService";
     public static final String PAYMENT_SERVICE = "paymentService";
+    public static final String OTP_SERVICE = "otpService"; // NEW: OTP Service
     
     /**
      * Private constructor to prevent instantiation
@@ -43,15 +51,28 @@ public class RMIConnectionManager {
     public static synchronized boolean initializeConnection() {
         try {
             LogUtil.info("Initializing RMI connection to " + RMI_HOST + ":" + RMI_PORT);
+            
+            // Set RMI system properties
+            System.setProperty("java.rmi.server.hostname", RMI_HOST);
+            System.setProperty("java.rmi.server.useCodebaseOnly", "false");
+            
             registry = LocateRegistry.getRegistry(RMI_HOST, RMI_PORT);
             
             // Test the connection by listing services
             String[] services = registry.list();
             LogUtil.info("Successfully connected to RMI registry. Available services: " + String.join(", ", services));
             
+            connected = true;
             return true;
+        } catch (ConnectException e) {
+            LogUtil.error("Cannot connect to RMI server at " + RMI_HOST + ":" + RMI_PORT + 
+                         ". Please ensure the server is running.", e);
+            connected = false;
+            registry = null;
+            return false;
         } catch (Exception e) {
             LogUtil.error("Failed to initialize RMI connection", e);
+            connected = false;
             registry = null;
             return false;
         }
@@ -70,9 +91,11 @@ public class RMIConnectionManager {
             
             // Test by listing services
             registry.list();
+            connected = true;
             return true;
         } catch (Exception e) {
-            LogUtil.error("RMI connection test failed", e);
+            LogUtil.warn("RMI connection test failed", e);
+            connected = false;
             return false;
         }
     }
@@ -108,6 +131,13 @@ public class RMIConnectionManager {
             LogUtil.debug("Retrieved service: " + serviceName);
             return service;
             
+        } catch (NotBoundException e) {
+            LogUtil.error("Service " + serviceName + " is not bound in the registry", e);
+            return null;
+        } catch (ConnectException e) {
+            LogUtil.error("Connection lost while retrieving " + serviceName, e);
+            connected = false;
+            return null;
         } catch (Exception e) {
             LogUtil.error("Failed to get service: " + serviceName, e);
             return null;
@@ -178,12 +208,22 @@ public class RMIConnectionManager {
     }
     
     /**
+     * Gets the OTPService instance (NEW)
+     * 
+     * @return OTPService instance or null
+     */
+    public static OTPService getOTPService() {
+        return getService(OTP_SERVICE, OTPService.class);
+    }
+    
+    /**
      * Clears the service cache and forces reconnection
      */
     public static synchronized void clearCache() {
         LogUtil.info("Clearing RMI service cache");
         serviceCache.clear();
         registry = null;
+        connected = false;
     }
     
     /**
@@ -203,7 +243,7 @@ public class RMIConnectionManager {
      * @return true if connected, false otherwise
      */
     public static boolean isConnected() {
-        return registry != null && testConnection();
+        return connected && registry != null && testConnection();
     }
     
     /**
@@ -213,7 +253,7 @@ public class RMIConnectionManager {
      */
     public static String getConnectionInfo() {
         return "RMI Server: " + RMI_HOST + ":" + RMI_PORT + 
-               " (Connected: " + isConnected() + ")";
+               " (Connected: " + connected + ")";
     }
     
     /**
@@ -247,7 +287,8 @@ public class RMIConnectionManager {
             SUPPLIER_SERVICE,
             ORDER_SERVICE,
             INVOICE_SERVICE,
-            PAYMENT_SERVICE
+            PAYMENT_SERVICE,
+            OTP_SERVICE // Include OTP service in validation
         };
         
         try {
@@ -278,11 +319,29 @@ public class RMIConnectionManager {
     }
     
     /**
+     * Validates that all required services are available (enhanced version)
+     * 
+     * @return true if all services are available, false otherwise
+     */
+    public static boolean validateAllServices() {
+        return validateServices();
+    }
+    
+    /**
      * Gets the RMI host
      * 
      * @return RMI host address
      */
     public static String getHost() {
+        return RMI_HOST;
+    }
+    
+    /**
+     * Gets the RMI host (alternative method name for compatibility)
+     * 
+     * @return RMI host address
+     */
+    public static String getRMIHost() {
         return RMI_HOST;
     }
     
@@ -293,5 +352,24 @@ public class RMIConnectionManager {
      */
     public static int getPort() {
         return RMI_PORT;
+    }
+    
+    /**
+     * Gets the RMI port (alternative method name for compatibility)
+     * 
+     * @return RMI port number
+     */
+    public static int getRMIPort() {
+        return RMI_PORT;
+    }
+    
+    /**
+     * Closes the RMI connection and cleans up resources
+     */
+    public static void close() {
+        LogUtil.info("Closing RMI connection");
+        registry = null;
+        connected = false;
+        clearCache();
     }
 }

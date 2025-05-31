@@ -6,23 +6,16 @@ import ui.MainView;
 import ui.auth.LoginView;
 import ui.auth.Session;
 import util.LogUtil;
+import util.RMIConnectionManager;
 
 import javax.swing.*;
 import java.awt.*;
-import java.rmi.registry.LocateRegistry;
-import java.rmi.registry.Registry;
 
 /**
- * RMI-based Controller for authentication operations.
- * Manages the login process and user session using remote services.
+ * Simple Authentication Controller compatible with existing code structure
+ * Manages the login process using both traditional and OTP-based authentication
  */
 public class AuthController {
-    // RMI Configuration
-    private static final String RMI_HOST = "127.0.0.1";
-    private static final int RMI_PORT = 4444;
-    
-    // Remote services
-    private UserService userService;
     
     // Views
     private LoginView loginView;
@@ -30,6 +23,9 @@ public class AuthController {
     
     // Session
     private Session session;
+    
+    // Services
+    private UserService userService;
     
     /**
      * Constructor
@@ -45,16 +41,33 @@ public class AuthController {
     }
     
     /**
-     * Initializes the RMI connection to the server
+     * Initializes the RMI connection
      */
     private void initializeRMIConnection() {
         try {
-            LogUtil.info("Connecting to RMI server at " + RMI_HOST + ":" + RMI_PORT);
-            Registry registry = LocateRegistry.getRegistry(RMI_HOST, RMI_PORT);
-            userService = (UserService) registry.lookup("userService");
-            LogUtil.info("Successfully connected to UserService");
+            LogUtil.info("Initializing RMI connection for authentication...");
+            
+            if (!RMIConnectionManager.initializeConnection()) {
+                showConnectionError();
+                return;
+            }
+            
+            // Validate that services are available
+            if (!RMIConnectionManager.validateServices()) {
+                LogUtil.warn("Not all required services are available");
+            }
+            
+            // Get the UserService
+            userService = RMIConnectionManager.getUserService();
+            if (userService != null) {
+                LogUtil.info("Successfully connected to UserService");
+            } else {
+                LogUtil.error("Failed to get UserService from RMI registry");
+                showConnectionError();
+            }
+            
         } catch (Exception e) {
-            LogUtil.error("Failed to connect to RMI server", e);
+            LogUtil.error("Failed to initialize RMI connection", e);
             showConnectionError();
         }
     }
@@ -63,49 +76,54 @@ public class AuthController {
      * Shows connection error dialog
      */
     private void showConnectionError() {
-        JOptionPane.showMessageDialog(
-            parentComponent,
-            "Failed to connect to the server.\nPlease ensure the server is running and try again.",
-            "Connection Error",
-            JOptionPane.ERROR_MESSAGE
-        );
-        System.exit(1);
+        SwingUtilities.invokeLater(() -> {
+            String message = "Unable to connect to the Business Management Server.\n\n" +
+                           "Please ensure that:\n" +
+                           "• The server is running\n" +
+                           "• The server is accessible at " + RMIConnectionManager.getHost() + 
+                           ":" + RMIConnectionManager.getPort() + "\n" +
+                           "• No firewall is blocking the connection\n\n" +
+                           "Contact your system administrator if the problem persists.";
+            
+            int result = JOptionPane.showConfirmDialog(
+                parentComponent,
+                message,
+                "Server Connection Error",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.ERROR_MESSAGE
+            );
+            
+            if (result == JOptionPane.YES_OPTION) {
+                initializeRMIConnection();
+            } else {
+                System.exit(1);
+            }
+        });
     }
     
     /**
-     * Shows the login view
+     * Shows the enhanced login view with OTP support
      */
     public void showLoginView() {
         loginView = new LoginView(new LoginView.AuthenticationCallback() {
             @Override
             public void onLoginSuccess(User user) {
-                // Set the current user in the session
-                session.setCurrentUser(user);
-                
-                // Close the login view
-                loginView.dispose();
-                
-                // Show the main view
-                SwingUtilities.invokeLater(() -> {
-                    MainView mainView = new MainView();
-                    mainView.setVisible(true);
-                });
+                handleLoginSuccess(user);
             }
             
             @Override
             public void onLoginFailure(String reason) {
-                // Already handled in LoginView
+                handleLoginFailure(reason);
             }
             
             @Override
             public void onCancel() {
-                // Exit the application
-                System.exit(0);
+                handleCancel();
             }
             
             @Override
             public void onForgotPassword() {
-                showForgotPasswordDialog();
+                handleForgotPassword();
             }
         });
         
@@ -114,126 +132,140 @@ public class AuthController {
     }
     
     /**
-     * Authenticates a user using RMI service
+     * Handles successful login
      * 
-     * @param username The username
-     * @param password The password
-     * @return The authenticated user if successful, null otherwise
+     * @param user The authenticated user
      */
-    public User authenticateUser(String username, String password) {
+    private void handleLoginSuccess(User user) {
         try {
-            if (userService == null) {
-                LogUtil.error("UserService is not available");
-                return null;
+            LogUtil.info("Login successful for user: " + user.getUsername() + 
+                        " (" + user.getFullName() + ")");
+            
+            // Log the authentication for audit trail
+            LogUtil.logAuthentication(user.getUsername(), true);
+            
+            // Set the current user in the session
+            session.setCurrentUser(user);
+            
+            // Close the login view
+            if (loginView != null) {
+                loginView.dispose();
             }
             
-            User user = userService.authenticateUser(username, password);
-            if (user != null) {
-                LogUtil.info("User authenticated successfully: " + username);
-            } else {
-                LogUtil.debug("Authentication failed for user: " + username);
-            }
-            return user;
+            // Show the main application view
+            SwingUtilities.invokeLater(() -> {
+                try {
+                    MainView mainView = new MainView();
+                    mainView.setVisible(true);
+                    LogUtil.info("Main application view displayed");
+                } catch (Exception e) {
+                    LogUtil.error("Failed to show main application view", e);
+                    showErrorMessage("Failed to load main application", e.getMessage());
+                }
+            });
+            
         } catch (Exception e) {
-            LogUtil.error("Error during authentication for user: " + username, e);
-            JOptionPane.showMessageDialog(
-                parentComponent,
-                "Authentication error: " + e.getMessage(),
-                "Authentication Error",
-                JOptionPane.ERROR_MESSAGE
-            );
-            return null;
+            LogUtil.error("Error handling login success", e);
+            showErrorMessage("Login Error", "An error occurred after successful authentication: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Handles login failure
+     * 
+     * @param reason The reason for failure
+     */
+    private void handleLoginFailure(String reason) {
+        LogUtil.warn("Login failed: " + reason);
+        // The login view will handle displaying the error message
+        // No additional action needed here
+    }
+    
+    /**
+     * Handles cancel/exit action
+     */
+    private void handleCancel() {
+        LogUtil.info("User cancelled login");
+        
+        int result = JOptionPane.showConfirmDialog(
+            loginView,
+            "Are you sure you want to exit the application?",
+            "Exit Application",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.QUESTION_MESSAGE
+        );
+        
+        if (result == JOptionPane.YES_OPTION) {
+            LogUtil.info("Application exit confirmed");
+            System.exit(0);
+        }
+    }
+    
+    /**
+     * Handles forgot password action
+     */
+    private void handleForgotPassword() {
+        LogUtil.info("Forgot password action triggered");
+        
+        // Create forgot password dialog
+        showForgotPasswordDialog();
     }
     
     /**
      * Shows the forgot password dialog
      */
     private void showForgotPasswordDialog() {
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
-        panel.setBackground(Color.WHITE);
-        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        
-        JLabel messageLabel = new JLabel("Enter your username to reset your password:");
-        messageLabel.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        
-        JTextField usernameField = new JTextField(20);
-        
-        JPanel fieldPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        fieldPanel.setOpaque(false);
-        fieldPanel.add(new JLabel("Username:"));
-        fieldPanel.add(usernameField);
-        
-        panel.add(messageLabel, BorderLayout.NORTH);
-        panel.add(fieldPanel, BorderLayout.CENTER);
-        
-        // Show the dialog
-        int result = JOptionPane.showConfirmDialog(
+        String email = JOptionPane.showInputDialog(
             loginView,
-            panel,
-            "Forgot Password",
-            JOptionPane.OK_CANCEL_OPTION,
+            "Enter your email address to reset your password:",
+            "Password Reset",
             JOptionPane.QUESTION_MESSAGE
         );
         
-        if (result == JOptionPane.OK_OPTION) {
-            String username = usernameField.getText().trim();
-            if (!username.isEmpty()) {
-                try {
-                    // Check if user exists
-                    User user = userService.findUserByUsername(username);
-                    if (user != null) {
-                        // In a real application, this would send a password reset email
-                        JOptionPane.showMessageDialog(
-                            loginView,
-                            "A password reset link has been sent to the email associated with this account.",
-                            "Password Reset",
-                            JOptionPane.INFORMATION_MESSAGE
-                        );
-                    } else {
-                        JOptionPane.showMessageDialog(
-                            loginView,
-                            "Username not found.",
-                            "User Not Found",
-                            JOptionPane.ERROR_MESSAGE
-                        );
-                    }
-                } catch (Exception e) {
-                    LogUtil.error("Error during password reset for user: " + username, e);
-                    JOptionPane.showMessageDialog(
-                        loginView,
-                        "Error processing password reset: " + e.getMessage(),
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE
-                    );
+        if (email != null && !email.trim().isEmpty()) {
+            try {
+                email = email.trim().toLowerCase();
+                
+                if (!isValidEmail(email)) {
+                    showErrorMessage("Invalid Email", "Please enter a valid email address.");
+                    return;
                 }
+                
+                if (userService != null) {
+                    boolean success = userService.initiatePasswordReset(email);
+                    
+                    if (success) {
+                        showInfoMessage("Password Reset", 
+                            "Password reset instructions have been sent to: " + email + "\n\n" +
+                            "Please check your email and follow the instructions to reset your password.");
+                        LogUtil.info("Password reset initiated for email: " + email);
+                    } else {
+                        showErrorMessage("Reset Failed", 
+                            "Failed to send password reset instructions. Please verify your email address and try again.");
+                    }
+                } else {
+                    showErrorMessage("Service Error", "Service unavailable. Please try again later.");
+                }
+            } catch (Exception e) {
+                LogUtil.error("Error processing password reset request", e);
+                showErrorMessage("Error", "Error processing password reset request: " + e.getMessage());
             }
         }
     }
     
     /**
-     * Logs out the current user
-     */
-    public void logout() {
-        // Clear the session
-        session.logout();
-        
-        // Show the login view
-        showLoginView();
-    }
-    
-    /**
-     * Shows the change password dialog
+     * Shows the change password dialog for logged-in users
      */
     public void showChangePasswordDialog() {
         if (!session.isLoggedIn()) {
+            showErrorMessage("Authentication Required", "Please log in to change your password.");
             return;
         }
         
+        // Create change password dialog
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(Color.WHITE);
-        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
         JLabel currentLabel = new JLabel("Current Password:");
         JPasswordField currentField = new JPasswordField(20);
@@ -274,32 +306,17 @@ public class AuthController {
             
             // Validate input
             if (currentPassword.isEmpty() || newPassword.isEmpty() || confirmPassword.isEmpty()) {
-                JOptionPane.showMessageDialog(
-                    parentComponent,
-                    "All fields are required.",
-                    "Validation Error",
-                    JOptionPane.ERROR_MESSAGE
-                );
+                showErrorMessage("Validation Error", "All fields are required.");
                 return;
             }
             
             if (newPassword.length() < 6) {
-                JOptionPane.showMessageDialog(
-                    parentComponent,
-                    "New password must be at least 6 characters long.",
-                    "Validation Error",
-                    JOptionPane.ERROR_MESSAGE
-                );
+                showErrorMessage("Validation Error", "New password must be at least 6 characters long.");
                 return;
             }
             
             if (!newPassword.equals(confirmPassword)) {
-                JOptionPane.showMessageDialog(
-                    parentComponent,
-                    "New password and confirmation do not match.",
-                    "Validation Error",
-                    JOptionPane.ERROR_MESSAGE
-                );
+                showErrorMessage("Validation Error", "New password and confirmation do not match.");
                 return;
             }
             
@@ -309,12 +326,7 @@ public class AuthController {
                 User authenticatedUser = userService.authenticateUser(currentUser.getUsername(), currentPassword);
                 
                 if (authenticatedUser == null) {
-                    JOptionPane.showMessageDialog(
-                        parentComponent,
-                        "Current password is incorrect.",
-                        "Authentication Error",
-                        JOptionPane.ERROR_MESSAGE
-                    );
+                    showErrorMessage("Authentication Error", "Current password is incorrect.");
                     return;
                 }
                 
@@ -322,30 +334,53 @@ public class AuthController {
                 int rowsAffected = userService.updatePassword(currentUser.getId(), newPassword);
                 
                 if (rowsAffected > 0) {
-                    JOptionPane.showMessageDialog(
-                        parentComponent,
-                        "Password updated successfully.",
-                        "Success",
-                        JOptionPane.INFORMATION_MESSAGE
-                    );
+                    showInfoMessage("Success", "Password updated successfully.");
+                    LogUtil.info("Password updated for user: " + currentUser.getUsername());
                 } else {
-                    JOptionPane.showMessageDialog(
-                        parentComponent,
-                        "Failed to update password. Please try again.",
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE
-                    );
+                    showErrorMessage("Error", "Failed to update password. Please try again.");
                 }
                 
             } catch (Exception e) {
                 LogUtil.error("Error updating password for user: " + session.getCurrentUser().getUsername(), e);
-                JOptionPane.showMessageDialog(
-                    parentComponent,
-                    "Error updating password: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE
-                );
+                showErrorMessage("Error", "Error updating password: " + e.getMessage());
             }
+            
+            // Clear password fields for security
+            currentField.setText("");
+            newField.setText("");
+            confirmField.setText("");
+        }
+    }
+    
+    /**
+     * Logs out the current user and shows login view
+     */
+    public void logout() {
+        try {
+            LogUtil.info("User logout initiated");
+            
+            User currentUser = session.getCurrentUser();
+            if (currentUser != null) {
+                LogUtil.info("User " + currentUser.getUsername() + " logged out");
+            }
+            
+            // Clear the session
+            session.logout();
+            
+            // Close any open windows except login
+            Window[] windows = Window.getWindows();
+            for (Window window : windows) {
+                if (window.isDisplayable() && !(window instanceof LoginView)) {
+                    window.dispose();
+                }
+            }
+            
+            // Show the login view again
+            showLoginView();
+            
+            LogUtil.info("User logout completed");
+        } catch (Exception e) {
+            LogUtil.error("Error during logout", e);
         }
     }
     
@@ -373,7 +408,7 @@ public class AuthController {
      * @return true if connected, false otherwise
      */
     public boolean isConnected() {
-        return userService != null;
+        return userService != null && RMIConnectionManager.isConnected();
     }
     
     /**
@@ -381,5 +416,50 @@ public class AuthController {
      */
     public void reconnect() {
         initializeRMIConnection();
+    }
+    
+    /**
+     * Validates email format
+     * 
+     * @param email The email to validate
+     * @return true if valid, false otherwise
+     */
+    private boolean isValidEmail(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            return false;
+        }
+        
+        String emailRegex = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+        return email.matches(emailRegex);
+    }
+    
+    /**
+     * Shows an error message dialog
+     * 
+     * @param title The dialog title
+     * @param message The error message
+     */
+    private void showErrorMessage(String title, String message) {
+        JOptionPane.showMessageDialog(
+            parentComponent,
+            message,
+            title,
+            JOptionPane.ERROR_MESSAGE
+        );
+    }
+    
+    /**
+     * Shows an info message dialog
+     * 
+     * @param title The dialog title
+     * @param message The info message
+     */
+    private void showInfoMessage(String title, String message) {
+        JOptionPane.showMessageDialog(
+            parentComponent,
+            message,
+            title,
+            JOptionPane.INFORMATION_MESSAGE
+        );
     }
 }

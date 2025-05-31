@@ -1,6 +1,6 @@
 package ui.product;
 
-import model.Product;
+import model.Product;  
 import model.Supplier;
 import controller.ProductController;
 import util.LogUtil;

@@ -1,5 +1,7 @@
 package ui;
 
+import util.TableExportManager;
+
 import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
@@ -7,10 +9,12 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.table.TableModel;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 /**
- * Factory class for creating standardized UI components with consistent styling.
- * This ensures a cohesive look and feel across the application.
+ * Enhanced Factory class for creating standardized UI components with export functionality.
+ * This ensures a cohesive look and feel across the application with modern export capabilities.
  */
 public class UIFactory {
     // Color palette
@@ -110,6 +114,94 @@ public class UIFactory {
     }
     
     /**
+     * Creates an export button with dropdown menu for different formats
+     * 
+     * @param table The table to export
+     * @param exportTitle Default title for exports
+     * @return Export button with dropdown menu
+     */
+    public static JButton createExportButton(JTable table, String exportTitle) {
+        JButton exportButton = createSecondaryButton("Export ▼");
+        exportButton.setToolTipText("Export table data to various formats");
+        
+        // Create popup menu for export options
+        JPopupMenu exportMenu = new JPopupMenu();
+        
+        // CSV export option
+        JMenuItem csvItem = new JMenuItem("Export to CSV");
+        csvItem.setIcon(createColoredIcon("📄", SUCCESS_COLOR));
+        csvItem.addActionListener(e -> TableExportManager.exportTable(table, exportTitle + " - CSV Export"));
+        exportMenu.add(csvItem);
+        
+        // Excel export option
+        JMenuItem excelItem = new JMenuItem("Export to Excel");
+        excelItem.setIcon(createColoredIcon("📊", new Color(0x107C41))); // Excel green
+        excelItem.addActionListener(e -> TableExportManager.exportTable(table, exportTitle + " - Excel Export"));
+        exportMenu.add(excelItem);
+        
+        // PDF export option
+        JMenuItem pdfItem = new JMenuItem("Export to PDF");
+        pdfItem.setIcon(createColoredIcon("📄", ERROR_COLOR));
+        pdfItem.addActionListener(e -> TableExportManager.exportTable(table, exportTitle + " - PDF Report"));
+        exportMenu.add(pdfItem);
+        
+        // HTML export option
+        JMenuItem htmlItem = new JMenuItem("Export to HTML");
+        htmlItem.setIcon(createColoredIcon("🌐", WARNING_COLOR));
+        htmlItem.addActionListener(e -> TableExportManager.exportTable(table, exportTitle + " - HTML Report"));
+        exportMenu.add(htmlItem);
+        
+        exportMenu.addSeparator();
+        
+        // Quick export options (no dialog)
+        JMenuItem quickCsvItem = new JMenuItem("Quick CSV Export");
+        quickCsvItem.setFont(SMALL_FONT);
+        quickCsvItem.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setSelectedFile(new java.io.File(exportTitle.replaceAll("[^a-zA-Z0-9]", "_") + ".csv"));
+            if (fileChooser.showSaveDialog(exportButton) == JFileChooser.APPROVE_OPTION) {
+                try {
+                    TableExportManager.quickExportCSV(table, exportTitle, fileChooser.getSelectedFile());
+                    JOptionPane.showMessageDialog(exportButton, "CSV export completed successfully!");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(exportButton, "Export failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+        exportMenu.add(quickCsvItem);
+        
+        // Add click listener to show popup menu
+        exportButton.addActionListener(e -> {
+            exportMenu.show(exportButton, 0, exportButton.getHeight());
+        });
+        
+        return exportButton;
+    }
+    
+    /**
+     * Creates a simple colored icon (emoji-based)
+     */
+    private static Icon createColoredIcon(String emoji, Color color) {
+        return new Icon() {
+            @Override
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                g2.setColor(color);
+                g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 12));
+                g2.drawString(emoji, x, y + 12);
+                g2.dispose();
+            }
+            
+            @Override
+            public int getIconWidth() { return 16; }
+            
+            @Override
+            public int getIconHeight() { return 16; }
+        };
+    }
+    
+    /**
      * Creates a standard panel with white background and padding
      * 
      * @return Styled JPanel
@@ -199,12 +291,13 @@ public class UIFactory {
     }
     
     /**
-     * Creates a header panel for module pages with title and action buttons
+     * Creates a header panel for module pages with title, export button, and action buttons
      * 
      * @param title Module title
-     * @return Header panel with title and space for actions
+     * @param table Table to export (can be null to disable export)
+     * @return Header panel with title, export, and space for actions
      */
-    public static JPanel createModuleHeaderPanel(String title) {
+    public static JPanel createModuleHeaderPanel(String title, JTable table) {
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.setBackground(Color.WHITE);
         headerPanel.setBorder(BorderFactory.createCompoundBorder(
@@ -216,16 +309,33 @@ public class UIFactory {
         titleLabel.setFont(TITLE_FONT);
         headerPanel.add(titleLabel, BorderLayout.WEST);
         
-        // Create an actions panel (right side)
+        // Create an actions panel (right side) with export button
         JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         actionsPanel.setOpaque(false);
+        
+        // Add export button if table is provided
+        if (table != null) {
+            JButton exportButton = createExportButton(table, title);
+            actionsPanel.add(exportButton);
+        }
+        
         headerPanel.add(actionsPanel, BorderLayout.EAST);
         
         return headerPanel;
     }
     
     /**
-     * Creates a styled table with consistent appearance
+     * Creates a header panel for module pages with title and action buttons (no export)
+     * 
+     * @param title Module title
+     * @return Header panel with title and space for actions
+     */
+    public static JPanel createModuleHeaderPanel(String title) {
+        return createModuleHeaderPanel(title, null);
+    }
+    
+    /**
+     * Creates a styled table with consistent appearance and export functionality
      * 
      * @param model Table data model
      * @return Styled JTable
@@ -240,6 +350,69 @@ public class UIFactory {
         table.getTableHeader().setBackground(LIGHT_GRAY);
         table.getTableHeader().setFont(HEADER_FONT);
         table.setFont(BODY_FONT);
+        
+        // Add context menu for quick export
+        JPopupMenu contextMenu = new JPopupMenu();
+        
+        JMenuItem exportCsvItem = new JMenuItem("Export to CSV");
+        exportCsvItem.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setSelectedFile(new java.io.File("table_export.csv"));
+            if (fileChooser.showSaveDialog(table) == JFileChooser.APPROVE_OPTION) {
+                try {
+                    TableExportManager.quickExportCSV(table, "Table Export", fileChooser.getSelectedFile());
+                    JOptionPane.showMessageDialog(table, "Export completed successfully!");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(table, "Export failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+        
+        JMenuItem exportExcelItem = new JMenuItem("Export to Excel");
+        exportExcelItem.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setSelectedFile(new java.io.File("table_export.xls"));
+            if (fileChooser.showSaveDialog(table) == JFileChooser.APPROVE_OPTION) {
+                try {
+                    TableExportManager.quickExportExcel(table, "Table Export", fileChooser.getSelectedFile());
+                    JOptionPane.showMessageDialog(table, "Export completed successfully!");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(table, "Export failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+        
+        contextMenu.add(exportCsvItem);
+        contextMenu.add(exportExcelItem);
+        contextMenu.addSeparator();
+        
+        JMenuItem selectAllItem = new JMenuItem("Select All");
+        selectAllItem.addActionListener(e -> table.selectAll());
+        contextMenu.add(selectAllItem);
+        
+        JMenuItem copyItem = new JMenuItem("Copy Selection");
+        copyItem.addActionListener(e -> {
+            // Copy selected cells to clipboard
+            StringBuilder sb = new StringBuilder();
+            int[] selectedRows = table.getSelectedRows();
+            int[] selectedCols = table.getSelectedColumns();
+            
+            for (int i = 0; i < selectedRows.length; i++) {
+                for (int j = 0; j < selectedCols.length; j++) {
+                    if (j > 0) sb.append("\t");
+                    Object value = table.getValueAt(selectedRows[i], selectedCols[j]);
+                    sb.append(value != null ? value.toString() : "");
+                }
+                if (i < selectedRows.length - 1) sb.append("\n");
+            }
+            
+            java.awt.datatransfer.StringSelection stringSelection = new java.awt.datatransfer.StringSelection(sb.toString());
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
+        });
+        contextMenu.add(copyItem);
+        
+        table.setComponentPopupMenu(contextMenu);
+        
         return table;
     }
     
@@ -254,6 +427,54 @@ public class UIFactory {
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.getViewport().setBackground(Color.WHITE);
         return scrollPane;
+    }
+    
+    /**
+     * Creates an enhanced table panel with export functionality
+     * 
+     * @param table The table to wrap
+     * @param title Title for the table panel
+     * @return Panel containing table with export controls
+     */
+    public static JPanel createTablePanelWithExport(JTable table, String title) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(Color.WHITE);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(0xE0E0E0), 1, true),
+            new EmptyBorder(0, 0, 0, 0)
+        ));
+        
+        // Create header with export button
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(LIGHT_GRAY);
+        headerPanel.setBorder(new EmptyBorder(8, 15, 8, 15));
+        
+        JLabel titleLabel = new JLabel(title);
+        titleLabel.setFont(HEADER_FONT);
+        headerPanel.add(titleLabel, BorderLayout.WEST);
+        
+        // Export controls on the right
+        JPanel exportPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        exportPanel.setOpaque(false);
+        
+        JButton exportButton = createExportButton(table, title);
+        exportButton.setPreferredSize(new Dimension(100, 25));
+        exportPanel.add(exportButton);
+        
+        // Add row count label
+        JLabel rowCountLabel = new JLabel(table.getRowCount() + " rows");
+        rowCountLabel.setFont(SMALL_FONT);
+        rowCountLabel.setForeground(MEDIUM_GRAY);
+        exportPanel.add(rowCountLabel);
+        
+        headerPanel.add(exportPanel, BorderLayout.EAST);
+        panel.add(headerPanel, BorderLayout.NORTH);
+        
+        // Add the table
+        JScrollPane scrollPane = createScrollPane(table);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        
+        return panel;
     }
     
     /**
@@ -436,5 +657,55 @@ public class UIFactory {
         }
         
         return button;
+    }
+    
+    /**
+     * Creates a toolbar with export functionality for list views
+     * 
+     * @param table The table associated with this toolbar
+     * @param title Title for exports
+     * @return Toolbar panel with export and other common actions
+     */
+    public static JPanel createListViewToolbar(JTable table, String title) {
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        toolbar.setBackground(LIGHT_GRAY);
+        toolbar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(0xE0E0E0)),
+            new EmptyBorder(5, 10, 5, 10)
+        ));
+        
+        // Export button
+        JButton exportButton = createExportButton(table, title);
+        exportButton.setPreferredSize(new Dimension(90, 28));
+        toolbar.add(exportButton);
+        
+        toolbar.add(Box.createHorizontalStrut(10));
+        
+        // Refresh button
+        JButton refreshButton = createSecondaryButton("Refresh");
+        refreshButton.setPreferredSize(new Dimension(80, 28));
+        toolbar.add(refreshButton);
+        
+        // Print button
+        JButton printButton = createSecondaryButton("Print");
+        printButton.setPreferredSize(new Dimension(70, 28));
+        printButton.addActionListener(e -> {
+            try {
+                table.print();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(table, "Print failed: " + ex.getMessage(), "Print Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        toolbar.add(printButton);
+        
+        toolbar.add(Box.createHorizontalGlue());
+        
+        // Row count indicator
+        JLabel rowCountLabel = new JLabel(table.getRowCount() + " rows");
+        rowCountLabel.setFont(SMALL_FONT);
+        rowCountLabel.setForeground(MEDIUM_GRAY);
+        toolbar.add(rowCountLabel);
+        
+        return toolbar;
     }
 }
